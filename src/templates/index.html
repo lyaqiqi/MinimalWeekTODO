@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>极简周计划</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Week header ── -->
+  <header id="week-header">
+    <button id="btn-prev" class="nav-btn" title="上一周">‹</button>
+    <h1 id="week-label"></h1>
+    <button id="btn-today" class="nav-btn today-btn">今日</button>
+    <button id="btn-next" class="nav-btn" title="下一周">›</button>
+  </header>
+
+  <!-- ── 6-column week grid ── -->
+  <main id="week-grid">
+    <!-- columns injected by app.js -->
+  </main>
+
+</div><!-- #app -->
+
+<!-- ── Edit modal ── -->
+<div id="modal-backdrop"></div>
+<div id="modal" role="dialog" aria-modal="true">
+
+  <div id="modal-top">
+    <div id="modal-date-label"></div>
+    <div id="modal-toolbar">
+      <button class="modal-tool-btn" id="modal-btn-reminder" title="设置提醒">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M8 2a5 5 0 0 1 5 5v2l1 2H2l1-2V7a5 5 0 0 1 5-5z"/>
+          <path d="M6.5 13.5a1.5 1.5 0 0 0 3 0"/>
+        </svg>
+      </button>
+      <button class="modal-tool-btn" id="modal-btn-color" title="颜色标签">
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="8" r="4.5"/>
+        </svg>
+      </button>
+      <button class="modal-tool-btn" id="modal-btn-recurring" title="循环设置">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 8a6 6 0 0 1 6-6 6 6 0 0 1 4.2 1.8"/>
+          <path d="M14 8a6 6 0 0 1-6 6 6 6 0 0 1-4.2-1.8"/>
+          <path d="M11 3.5l1.5-1.5 1.5 1.5M5 12.5l-1.5 1.5-1.5-1.5"/>
+        </svg>
+      </button>
+      <button class="modal-tool-btn modal-tool-btn--delete" id="modal-btn-delete" title="删除任务">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 4h10M6 4V2h4v2M5 4l.5 9h5L11 4"/>
+        </svg>
+      </button>
+      <button class="modal-tool-btn modal-tool-btn--close" id="modal-btn-close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <!-- Sub-pickers -->
+  <div id="modal-color-picker" class="modal-sub-panel hidden">
+    <span class="color-swatch selected" data-color="" style="background:#E8E8E4" title="无颜色">✕</span>
+    <span class="color-swatch" data-color="blue"   style="background:#4A90D9" title="蓝色"></span>
+    <span class="color-swatch" data-color="green"  style="background:#52B788" title="绿色"></span>
+    <span class="color-swatch" data-color="red"    style="background:#E8524A" title="红色"></span>
+    <span class="color-swatch" data-color="yellow" style="background:#F5A623" title="黄色"></span>
+    <span class="color-swatch" data-color="purple" style="background:#9B59B6" title="紫色"></span>
+  </div>
+
+  <div id="modal-recurring-picker" class="modal-sub-panel hidden">
+    <button class="recur-btn active" data-value="">不循环</button>
+    <button class="recur-btn" data-value="daily">每天</button>
+    <button class="recur-btn" data-value="weekly">每周</button>
+    <button class="recur-btn" data-value="monthly">每月</button>
+  </div>
+
+  <div id="modal-reminder-picker" class="modal-sub-panel hidden">
+    <input type="datetime-local" id="modal-reminder-input" />
+    <button id="modal-reminder-clear">清除</button>
+  </div>
+
+  <!-- Main body -->
+  <div id="modal-body">
+    <input id="modal-title-input" type="text" placeholder="任务名称…" autocomplete="off" spellcheck="false" />
+    <textarea id="modal-notes-input" placeholder="添加备注…" rows="3" spellcheck="false"></textarea>
+
+    <div id="modal-subtasks-section">
+      <div id="modal-subtask-list"></div>
+      <div id="modal-add-subtask-row">
+        <input id="modal-subtask-input" type="text" placeholder="＋ 添加子任务…" autocomplete="off" />
+      </div>
+    </div>
+  </div>
+
+</div><!-- #modal -->
+
+<!-- ── Toast container ── -->
+<div id="toast-container" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
