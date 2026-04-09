@@ -2,6 +2,7 @@
 Task data model + JSON persistence for the Weekly Planner app.
 """
 
+import calendar
 import json
 import os
 import uuid
@@ -40,6 +41,7 @@ def make_task(
     notes: str = '',
     recurring: Optional[str] = None,
     order: int = 0,
+    recurring_origin: Optional[str] = None,
 ) -> dict:
     return {
         'id': str(uuid.uuid4()),
@@ -54,6 +56,8 @@ def make_task(
         'color': color,
         'notes': notes,
         'recurring': recurring,
+        'recurring_origin': recurring_origin,
+        'deleted_dates': [],
         'order': order,
     }
 
@@ -82,7 +86,6 @@ def delete_task_recursive(tasks: list[dict], task_id: str) -> list[dict]:
 
     collect(task_id)
 
-    # Remove from parent's children list
     if task.get('parent_id'):
         parent = get_task_by_id(tasks, task['parent_id'])
         if parent:
@@ -104,6 +107,144 @@ def update_parent_done_state(tasks: list[dict], parent_id: str):
         parent['done'] = False
 
 
+def next_recurring_task(task: dict, tasks: list[dict]) -> Optional[dict]:
+    """Create the next periodic instance of a completed task.
+
+    Returns a new task dict, or None if one already exists or rule is unknown.
+    """
+    recurring = task.get('recurring')
+    if not recurring:
+        return None
+
+    try:
+        day = date.fromisoformat(task['day'])
+    except (ValueError, KeyError):
+        return None
+
+    if recurring == 'daily':
+        next_day = day + timedelta(days=1)
+    elif recurring == 'weekly':
+        next_day = day + timedelta(weeks=1)
+    elif recurring == 'monthly':
+        month = day.month + 1
+        year  = day.year
+        if month > 12:
+            month = 1
+            year += 1
+        last = calendar.monthrange(year, month)[1]
+        next_day = day.replace(year=year, month=month, day=min(day.day, last))
+    else:
+        return None
+
+    next_day_str = str(next_day)
+
+    # Avoid duplicate: same title + day + not yet done
+    for t in tasks:
+        if (t.get('title') == task['title']
+                and t.get('day') == next_day_str
+                and not t.get('done')
+                and not t.get('parent_id')):
+            return None
+
+    # Shift deadline by the same delta
+    next_deadline: Optional[str] = None
+    if task.get('deadline'):
+        try:
+            dl    = datetime.fromisoformat(task['deadline'])
+            delta = next_day - day
+            next_deadline = (dl + timedelta(days=delta.days)).strftime('%Y-%m-%dT%H:%M')
+        except (ValueError, TypeError):
+            pass
+
+    return make_task(
+        task['title'],
+        next_day_str,
+        priority=task.get('priority', 'normal'),
+        color=task.get('color'),
+        deadline=next_deadline,
+        notes=task.get('notes', ''),
+        recurring=recurring,
+        order=task.get('order', 0),
+    )
+
+
+def should_show_recurring_on_date(task: dict, d: date) -> bool:
+    """Return True if the recurring task (template) should appear on date d."""
+    try:
+        start = date.fromisoformat(task['day'])
+    except (ValueError, KeyError):
+        return False
+    if d < start:
+        return False
+    recurring_end = task.get('recurring_end')
+    if recurring_end:
+        try:
+            if d > date.fromisoformat(recurring_end):
+                return False
+        except ValueError:
+            pass
+    recurring = task.get('recurring')
+    if recurring == 'daily':
+        return True
+    if recurring == 'weekly':
+        return d.weekday() == start.weekday()
+    if recurring == 'monthly':
+        return d.day == start.day
+    return False
+
+
+def generate_recurring_instances(tasks: list[dict], week_start: str) -> list[dict]:
+    """Create concrete task instances for recurring templates that are missing for the week.
+
+    Returns a list of new task dicts (caller must extend tasks list and save).
+    """
+    try:
+        start = date.fromisoformat(week_start)
+    except ValueError:
+        return []
+    week_dates = [start + timedelta(days=i) for i in range(7)]
+
+    # Templates: recurring tasks that are not themselves instances
+    templates = [
+        t for t in tasks
+        if t.get('recurring') and not t.get('recurring_origin') and not t.get('parent_id')
+    ]
+    if not templates:
+        return []
+
+    # Build covered set: (origin_id, day) that already exist
+    covered: set[tuple[str, str]] = set()
+    for t in tasks:
+        if t.get('recurring'):
+            origin = t.get('recurring_origin') or t['id']
+            covered.add((origin, t['day']))
+
+    new_instances: list[dict] = []
+    for tmpl in templates:
+        deleted_dates = set(tmpl.get('deleted_dates', []))
+        for d in week_dates:
+            date_str = str(d)
+            if date_str in deleted_dates:
+                continue
+            if (tmpl['id'], date_str) in covered:
+                continue
+            if should_show_recurring_on_date(tmpl, d):
+                instance = make_task(
+                    tmpl['title'],
+                    date_str,
+                    priority=tmpl.get('priority', 'normal'),
+                    color=tmpl.get('color'),
+                    notes=tmpl.get('notes', ''),
+                    recurring=tmpl.get('recurring'),
+                    order=tmpl.get('order', 0),
+                    recurring_origin=tmpl['id'],
+                )
+                new_instances.append(instance)
+                covered.add((tmpl['id'], date_str))  # prevent duplicate in same batch
+
+    return new_instances
+
+
 def get_week_tasks(tasks: list[dict], week_start: str) -> list[dict]:
     """Return tasks whose day falls in the 7-day window starting at week_start."""
     try:
@@ -112,25 +253,3 @@ def get_week_tasks(tasks: list[dict], week_start: str) -> list[dict]:
         return tasks
     days = {str(start + timedelta(days=i)) for i in range(7)}
     return [t for t in tasks if t.get('day') in days]
-
-
-if __name__ == '__main__':
-    # Quick self-test
-    tasks = load_tasks()
-    print(f'Loaded {len(tasks)} tasks from {DATA_FILE}')
-
-    t1 = make_task('Test parent', '2026-04-07', priority='important')
-    t2 = make_task('Test child', '2026-04-07', parent_id=t1['id'])
-    t1['children'].append(t2['id'])
-
-    tasks.extend([t1, t2])
-    save_tasks(tasks)
-    print(f'Saved {len(tasks)} tasks')
-
-    t2['done'] = True
-    update_parent_done_state(tasks, t1['id'])
-    print(f'Parent done after child done: {t1["done"]}')
-
-    tasks = delete_task_recursive(tasks, t1['id'])
-    save_tasks(tasks)
-    print(f'After delete: {len(tasks)} tasks')

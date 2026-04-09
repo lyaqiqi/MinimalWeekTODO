@@ -5,9 +5,15 @@ APScheduler — checks task deadlines every minute and broadcasts SSE reminders.
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from models import load_tasks, save_tasks, get_task_by_id
+from models import load_tasks, save_tasks
 
-_broadcast_fn = None
+
+def _broadcast_fn_ref():
+    """Indirection wrapper — replaced at startup."""
+    pass
+
+
+_broadcast = None
 
 
 def _check_deadlines():
@@ -17,26 +23,27 @@ def _check_deadlines():
 
     for task in tasks:
         deadline = task.get('deadline')
-        if deadline and not task.get('reminded') and not task.get('done'):
-            # Compare up to the minute
-            if deadline[:16] == now:
-                task['reminded'] = True
-                changed = True
-                if _broadcast_fn:
-                    _broadcast_fn('reminder', {
-                        'id': task['id'],
-                        'title': task['title'],
-                        'deadline': deadline,
-                        'day': task['day'],
-                    })
+        if not deadline or task.get('reminded') or task.get('done'):
+            continue
+        # Fire for exact minute OR any overdue deadline not yet reminded
+        if deadline[:16] <= now:
+            task['reminded'] = True
+            changed = True
+            if _broadcast:
+                _broadcast('reminder', {
+                    'type':      'reminder',
+                    'task_id':   task['id'],
+                    'title':     task['title'],
+                    'timestamp': task['deadline'],
+                })
 
     if changed:
         save_tasks(tasks)
 
 
 def start_scheduler(broadcast_fn):
-    global _broadcast_fn
-    _broadcast_fn = broadcast_fn
+    global _broadcast
+    _broadcast = broadcast_fn
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(_check_deadlines, 'interval', minutes=1, id='deadline_check')

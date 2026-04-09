@@ -18,9 +18,7 @@
   </header>
 
   <!-- ── 6-column week grid ── -->
-  <main id="week-grid">
-    <!-- columns injected by app.js -->
-  </main>
+  <main id="week-grid"></main>
 
 </div><!-- #app -->
 
@@ -60,7 +58,7 @@
 
   <!-- Sub-pickers -->
   <div id="modal-color-picker" class="modal-sub-panel hidden">
-    <span class="color-swatch selected" data-color="" style="background:#E8E8E4" title="无颜色">✕</span>
+    <span class="color-swatch selected" data-color=""     style="background:#E8E8E4" title="无颜色">✕</span>
     <span class="color-swatch" data-color="blue"   style="background:#4A90D9" title="蓝色"></span>
     <span class="color-swatch" data-color="green"  style="background:#52B788" title="绿色"></span>
     <span class="color-swatch" data-color="red"    style="background:#E8524A" title="红色"></span>
@@ -80,20 +78,59 @@
     <button id="modal-reminder-clear">清除</button>
   </div>
 
+  <!-- Priority picker -->
+  <div id="modal-priority-row" class="modal-sub-panel">
+    <button class="priority-btn active" data-priority="normal">普通</button>
+    <button class="priority-btn" data-priority="important">
+      <span class="priority-dot" style="background:#F5A623"></span>重要
+    </button>
+    <button class="priority-btn" data-priority="urgent">
+      <span class="priority-dot" style="background:#E8524A"></span>紧急
+    </button>
+  </div>
+
   <!-- Main body -->
   <div id="modal-body">
-    <input id="modal-title-input" type="text" placeholder="任务名称…" autocomplete="off" spellcheck="false" />
-    <textarea id="modal-notes-input" placeholder="添加备注…" rows="3" spellcheck="false"></textarea>
+    <input id="modal-title-input" type="text" placeholder="任务名称…"
+           autocomplete="off" spellcheck="false" />
+    <textarea id="modal-notes-input" placeholder="添加备注…"
+              rows="3" spellcheck="false"></textarea>
 
     <div id="modal-subtasks-section">
       <div id="modal-subtask-list"></div>
       <div id="modal-add-subtask-row">
-        <input id="modal-subtask-input" type="text" placeholder="＋ 添加子任务…" autocomplete="off" />
+        <input id="modal-subtask-input" type="text"
+               placeholder="＋ 添加子任务…" autocomplete="off" />
       </div>
     </div>
   </div>
 
 </div><!-- #modal -->
+
+<!-- ── Right-click context menu (priority quick-set) ── -->
+<div id="context-menu">
+  <button class="ctx-item" data-priority="normal">普通</button>
+  <button class="ctx-item" data-priority="important">
+    <span class="ctx-dot" style="background:#F5A623"></span>重要
+  </button>
+  <button class="ctx-item" data-priority="urgent">
+    <span class="ctx-dot" style="background:#E8524A"></span>紧急
+  </button>
+</div>
+
+<!-- ── Recurring scope dialog ── -->
+<div id="recur-scope-backdrop"></div>
+<div id="recur-scope-dialog" role="dialog" aria-modal="true">
+  <p id="recur-scope-msg"></p>
+  <div id="recur-scope-btns">
+    <button id="recur-scope-single">仅此任务</button>
+    <button id="recur-scope-future">此任务及之后所有任务</button>
+    <button id="recur-scope-cancel">取消</button>
+  </div>
+</div>
+
+<!-- ── SSE Reminder cards container ── -->
+<div id="reminder-container"></div>
 
 <!-- ── Toast container ── -->
 <div id="toast-container" aria-live="polite"></div>
