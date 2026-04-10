@@ -7,8 +7,12 @@ import queue
 import threading
 from datetime import date, timedelta
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
+from ai_service import decompose_task
 from models import (
     delete_task_recursive,
     generate_recurring_instances,
@@ -103,13 +107,15 @@ def create_task():
     if not title:
         return jsonify({'error': 'title is required'}), 400
 
-    day      = body.get('day') or str(date.today())
-    parent_id = body.get('parent_id')
-    priority  = body.get('priority', 'normal')
-    color     = body.get('color')
-    deadline  = body.get('deadline')
-    notes     = body.get('notes', '')
-    recurring = body.get('recurring')
+    day            = body.get('day') or str(date.today())
+    parent_id      = body.get('parent_id')
+    priority       = body.get('priority', 'normal')
+    color          = body.get('color')
+    deadline       = body.get('deadline')
+    notes          = body.get('notes', '')
+    recurring      = body.get('recurring')
+    estimated_time = body.get('estimated_time')  # int (minutes) or None
+    ai_group_id    = body.get('ai_group_id')
 
     tasks = load_tasks()
 
@@ -124,7 +130,8 @@ def create_task():
     order = max((t['order'] for t in tasks if t.get('day') == day and not t.get('parent_id')), default=-1) + 1
     task = make_task(title, day, parent_id=parent_id, priority=priority,
                      color=color, deadline=deadline, notes=notes,
-                     recurring=recurring, order=order)
+                     recurring=recurring, order=order,
+                     estimated_time=estimated_time, ai_group_id=ai_group_id)
 
     if parent_id:
         get_task_by_id(tasks, parent_id)['children'].append(task['id'])
@@ -149,7 +156,32 @@ def update_task(task_id):
     if task.get('children') and 'done' in body:
         return jsonify({'error': 'parent done state is driven by its children'}), 400
 
-    scope = body.get('scope', 'single')  # 'single' | 'future'
+    scope = body.get('scope', 'single')  # 'single' | 'future' | 'ai_group'
+
+    # ── scope=future, non-recurring-rule change: batch-update all future instances ──
+    if scope == 'future' and task.get('recurring_origin') and 'recurring' not in body:
+        origin_id = task['recurring_origin']
+        day_str   = task['day']
+        future    = [t for t in tasks
+                     if t.get('recurring_origin') == origin_id and t['day'] >= day_str]
+        batch_fields = ['color', 'priority', 'title', 'notes', 'deadline', 'reminded', 'estimated_time']
+        for ft in future:
+            for field in batch_fields:
+                if field in body:
+                    ft[field] = body[field]
+        save_tasks(tasks)
+        return jsonify({'task': task})
+
+    # ── scope=ai_group: batch-update color/priority across the AI group ──────────
+    if scope == 'ai_group' and task.get('ai_group_id'):
+        group_id    = task['ai_group_id']
+        group_tasks = [t for t in tasks if t.get('ai_group_id') == group_id]
+        for gt in group_tasks:
+            for field in ['color', 'priority']:
+                if field in body:
+                    gt[field] = body[field]
+        save_tasks(tasks)
+        return jsonify({'task': task})
 
     # Recurring change on an instance: handle scope before normal field updates
     if 'recurring' in body and task.get('recurring_origin'):
@@ -172,7 +204,7 @@ def update_task(task_id):
 
     updatable = [
         'title', 'done', 'deadline', 'priority', 'color',
-        'notes', 'order', 'reminded', 'recurring', 'day',
+        'notes', 'order', 'reminded', 'recurring', 'day', 'estimated_time',
     ]
     for field in updatable:
         if field not in body:
@@ -203,7 +235,34 @@ def delete_task(task_id):
     if task is None:
         return jsonify({'error': 'task not found'}), 404
 
-    scope = request.args.get('scope', 'single')  # 'single' | 'future'
+    scope = request.args.get('scope', 'single')  # 'single' | 'future' | 'ai_group'
+
+    # ── scope=ai_group: delete all tasks in the same AI group ───────────────────
+    if scope == 'ai_group' and task.get('ai_group_id'):
+        group_id   = task['ai_group_id']
+        root_tasks = [t for t in tasks
+                      if t.get('ai_group_id') == group_id and not t.get('parent_id')]
+        for rt in root_tasks:
+            tasks = delete_task_recursive(tasks, rt['id'])
+        save_tasks(tasks)
+        return jsonify({'deleted': task_id})
+
+    # ── Subtask with scope=future: also delete from future parent instances ──────
+    if scope == 'future' and task.get('parent_id') and not task.get('recurring_origin'):
+        parent_task = get_task_by_id(tasks, task['parent_id'])
+        if parent_task and parent_task.get('recurring_origin'):
+            origin_id   = parent_task['recurring_origin']
+            day_str     = parent_task['day']
+            future_pars = [t for t in tasks
+                           if t.get('recurring_origin') == origin_id and t['day'] > day_str]
+            for fp in future_pars:
+                matching = [t for t in tasks
+                            if t.get('parent_id') == fp['id'] and t.get('title') == task['title']]
+                for m in matching:
+                    tasks = delete_task_recursive(tasks, m['id'])
+        tasks = delete_task_recursive(tasks, task_id)
+        save_tasks(tasks)
+        return jsonify({'deleted': task_id})
 
     if task.get('recurring_origin'):
         template_id = task['recurring_origin']
@@ -255,9 +314,23 @@ def create_subtask(task_id):
     if not title:
         return jsonify({'error': 'title is required'}), 400
 
+    scope = body.get('scope', 'single')
+
     subtask = make_task(title, parent['day'], parent_id=task_id, order=len(parent['children']))
     parent['children'].append(subtask['id'])
     tasks.append(subtask)
+
+    # scope=future: add the same subtask to all future recurring instances of this parent
+    if scope == 'future' and parent.get('recurring_origin'):
+        origin_id   = parent['recurring_origin']
+        day_str     = parent['day']
+        future_pars = [t for t in tasks
+                       if t.get('recurring_origin') == origin_id and t['day'] > day_str]
+        for fp in future_pars:
+            fs = make_task(title, fp['day'], parent_id=fp['id'], order=len(fp['children']))
+            fp['children'].append(fs['id'])
+            tasks.append(fs)
+
     save_tasks(tasks)
     return jsonify(subtask), 201
 
@@ -297,6 +370,21 @@ def get_all_tasks():
     tasks = load_tasks()
     tasks.sort(key=lambda t: (t.get('day', ''), t.get('order', 0)))
     return jsonify(tasks)
+
+
+# ── POST /api/ai/decompose ───────────────────────────────────────────────────
+
+@app.route('/api/ai/decompose', methods=['POST'])
+def api_decompose_task():
+    body = request.get_json(force=True)
+    task_title = (body.get('task_title') or '').strip()
+    context    = (body.get('context')    or '').strip()
+
+    if not task_title:
+        return jsonify({'success': False, 'error': '请输入任务标题'})
+
+    result = decompose_task(task_title, context)
+    return jsonify(result)
 
 
 if __name__ == '__main__':

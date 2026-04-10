@@ -22,7 +22,8 @@ def _ensure_data_file():
 def load_tasks() -> list[dict]:
     _ensure_data_file()
     with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+        tasks = json.load(f)
+    return [migrate_task(t) for t in tasks]
 
 
 def save_tasks(tasks: list[dict]):
@@ -42,6 +43,8 @@ def make_task(
     recurring: Optional[str] = None,
     order: int = 0,
     recurring_origin: Optional[str] = None,
+    estimated_time: Optional[int] = None,
+    ai_group_id: Optional[str] = None,
 ) -> dict:
     return {
         'id': str(uuid.uuid4()),
@@ -59,7 +62,21 @@ def make_task(
         'recurring_origin': recurring_origin,
         'deleted_dates': [],
         'order': order,
+        'created_at': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+        'estimated_time': estimated_time,
+        'ai_group_id': ai_group_id,
     }
+
+
+def migrate_task(task: dict) -> dict:
+    """Ensure a task loaded from disk has all current fields (backward compat)."""
+    if 'created_at' not in task:
+        task['created_at'] = task.get('day', '') + 'T00:00:00'
+    if 'estimated_time' not in task:
+        task['estimated_time'] = None
+    if 'ai_group_id' not in task:
+        task['ai_group_id'] = None
+    return task
 
 
 def get_task_by_id(tasks: list[dict], task_id: str) -> Optional[dict]:

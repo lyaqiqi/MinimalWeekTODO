@@ -6,7 +6,58 @@
 // ── Constants ──────────────────────────────────────────────────────
 const WEEKDAYS_EN  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKDAYS_CN  = ['周一','周二','周三','周四','周五','周六','周日'];
-const COLOR_MAP    = { blue:'#4A90D9', green:'#52B788', red:'#E8524A', yellow:'#F5A623', purple:'#9B59B6' };
+// ── Color system (merges built-ins with localStorage user colors) ──
+const BUILTIN_COLORS = [
+  { key: 'blue',   hex: '#4A90D9', name: 'Study'    },
+  { key: 'green',  hex: '#52B788', name: 'Relax'    },
+  { key: 'red',    hex: '#E8524A', name: 'Urgent'   },
+  { key: 'yellow', hex: '#F5A623', name: 'Focus'    },
+  { key: 'purple', hex: '#9B59B6', name: 'Personal' },
+];
+
+function getUserColors() {
+  try {
+    const saved = localStorage.getItem('user-colors');
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return BUILTIN_COLORS.map(c => ({ ...c }));
+}
+
+function saveUserColors(colors) {
+  localStorage.setItem('user-colors', JSON.stringify(colors));
+}
+
+function getColorHex(key) {
+  const c = getUserColors().find(c => c.key === key);
+  return c ? c.hex : '#BBBBB6';
+}
+
+function getColorName(key) {
+  const c = getUserColors().find(c => c.key === key);
+  return c ? c.name : key;
+}
+
+// Inject <style> tag with color pill rules for all user colors
+function injectColorStyles() {
+  let el = document.getElementById('dynamic-color-styles');
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'dynamic-color-styles';
+    document.head.appendChild(el);
+  }
+  const colors = getUserColors();
+  el.textContent = colors.map(({ key, hex }) => {
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    const bg   = `rgba(${r},${g},${b},0.25)`;
+    const text = hex;
+    return `.task-title-pill[data-color="${key}"]{background:${bg};color:${text};}`;
+  }).join('\n');
+}
+
+// Legacy alias used throughout the file
+const COLOR_MAP = new Proxy({}, { get: (_, key) => getColorHex(key) });
 const SAVE_DELAY   = 600;
 const DELETE_GRACE = 5000;
 
@@ -22,6 +73,24 @@ const state = {
 
 // Drag state (module-level, not inside `state` to avoid JSON clone issues)
 let drag = { taskId: null, sourceDay: null, indicatorEl: null };
+
+// ── Theme management ───────────────────────────────────────────────
+const _mq = window.matchMedia('(prefers-color-scheme: dark)');
+
+function applyTheme(mode) {
+  const isDark = mode === 'dark' || (mode === 'system' && _mq.matches);
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+}
+
+function getThemeMode() {
+  return localStorage.getItem('theme-mode') || 'light';
+}
+
+function setThemeMode(mode) {
+  localStorage.setItem('theme-mode', mode);
+  applyTheme(mode);
+  renderThemeOptions(mode);
+}
 
 // Context-menu target
 let ctxTaskId = null;
@@ -98,7 +167,7 @@ const api = {
   createTask(data)      { return this.call('POST', '/api/tasks', data); },
   updateTask(id, data)  { return this.call('PUT', `/api/tasks/${id}`, data); },
   deleteTask(id)        { return this.call('DELETE', `/api/tasks/${id}`); },
-  createSubtask(id, t)  { return this.call('POST', `/api/tasks/${id}/subtasks`, { title: t }); },
+  createSubtask(id, t, scope = 'single') { return this.call('POST', `/api/tasks/${id}/subtasks`, { title: t, scope }); },
   reorder(items)        { return this.call('POST', '/api/tasks/reorder', items); },
 };
 
@@ -422,14 +491,33 @@ async function toggleDone(taskId, done) {
 async function setPriority(taskId, priority) {
   const task = getTask(taskId);
   if (!task) return;
-  task.priority = priority;
+
+  let scope = 'single';
+  if (task.recurring_origin) {
+    scope = await showRecurScopeDialog('如何修改优先级？');
+    if (scope === null) return;
+  } else if (task.ai_group_id) {
+    scope = await showScopeDialog('如何修改优先级？', '仅此任务', 'single', '同组所有任务', 'ai_group');
+    if (scope === null) return;
+  }
+
+  // Optimistic update
+  if (scope === 'future' && task.recurring_origin) {
+    state.tasks.filter(t => t.recurring_origin === task.recurring_origin && t.day >= task.day)
+      .forEach(t => { t.priority = priority; });
+  } else if (scope === 'ai_group' && task.ai_group_id) {
+    state.tasks.filter(t => t.ai_group_id === task.ai_group_id)
+      .forEach(t => { t.priority = priority; });
+  } else {
+    task.priority = priority;
+  }
   renderCurrentView();
   if (state.modalTaskId === taskId) {
     document.querySelectorAll('.priority-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.priority === priority));
   }
   try {
-    await api.updateTask(taskId, { priority });
+    await api.updateTask(taskId, { priority, scope });
   } catch (e) { showToast('设置失败', true); await loadWeek(true); }
 }
 
@@ -438,11 +526,20 @@ async function deleteTask(taskId) {
   const task = getTask(taskId);
   if (!task) return;
 
-  // Ask scope for recurring instances
+  // Ask scope
   let scope = 'single';
   if (task.recurring_origin) {
     scope = await showRecurScopeDialog('如何删除这个循环任务？');
-    if (scope === null) return; // cancelled
+    if (scope === null) return;
+  } else if (!task.parent_id && task.ai_group_id) {
+    scope = await showScopeDialog('如何删除这个任务？', '仅此任务', 'single', '删除同组所有任务', 'ai_group');
+    if (scope === null) return;
+  } else if (task.parent_id) {
+    const parent = getTask(task.parent_id);
+    if (parent?.recurring_origin) {
+      scope = await showScopeDialog('如何删除这个子任务？', '仅此任务', 'single', '此任务及之后所有同类实例', 'future');
+      if (scope === null) return;
+    }
   }
 
   if (state.pendingDeletes.has(taskId)) {
@@ -464,10 +561,33 @@ async function deleteTask(taskId) {
     return;
   }
 
-  if (state.pendingDeletes.has(taskId)) {
-    const prev = state.pendingDeletes.get(taskId);
-    clearTimeout(prev.timer);
-    prev.toastEl?.remove();
+  // "ai_group" scope: remove all tasks in same AI group
+  if (scope === 'ai_group' && task.ai_group_id) {
+    const groupId = task.ai_group_id;
+    state.tasks = state.tasks.filter(t => t.ai_group_id !== groupId);
+    if (state.modalTaskId === taskId) closeModal();
+    renderCurrentView();
+    try { await api.call('DELETE', `/api/tasks/${taskId}?scope=ai_group`); }
+    catch { showToast('删除失败', true); await loadWeek(true); }
+    return;
+  }
+
+  // "future" scope on a subtask: remove same-titled subtasks from future parent instances
+  if (scope === 'future' && task.parent_id) {
+    const parent = getTask(task.parent_id);
+    if (parent?.recurring_origin) {
+      const originId = parent.recurring_origin;
+      const fromDay  = parent.day;
+      // Remove matching subtasks from future parent instances
+      state.tasks = state.tasks.filter(t => {
+        if (!t.parent_id) return true;
+        const tParent = getTask(t.parent_id);
+        return !(tParent?.recurring_origin === originId &&
+                 tParent.day > fromDay &&
+                 t.title === task.title);
+      });
+    }
+    // Fall through to also remove the original subtask with undo
   }
 
   const toRemove = new Set();
@@ -492,8 +612,9 @@ async function deleteTask(taskId) {
     snapshot, toastEl: toast,
     timer: setTimeout(async () => {
       state.pendingDeletes.delete(taskId);
-      try { await api.deleteTask(taskId); }
-      catch { state.tasks = snapshot; renderGrid(); showToast('删除失败', true); }
+      const scopeParam = scope !== 'single' ? `?scope=${scope}` : '';
+      try { await api.call('DELETE', `/api/tasks/${taskId}${scopeParam}`); }
+      catch { state.tasks = snapshot; renderCurrentView(); showToast('删除失败', true); }
     }, DELETE_GRACE),
   };
   state.pendingDeletes.set(taskId, entry);
@@ -568,17 +689,38 @@ function openModal(taskId) {
   document.getElementById('modal-backdrop').classList.add('visible');
   document.getElementById('modal').classList.add('visible');
   renderModalContent(task);
+  renderModalColorPicker();
   // Close sub-panels
   ['modal-color-picker','modal-recurring-picker','modal-reminder-picker'].forEach(id =>
     document.getElementById(id).classList.add('hidden'));
   document.querySelectorAll('.modal-tool-btn').forEach(b => b.classList.remove('active'));
 }
 
-function closeModal() {
-  flushSave();
+let _closingModal = false;
+async function closeModal() {
+  if (_closingModal) return;
+  _closingModal = true;
+  clearTimeout(_saveTimer);
+
+  const id   = state.modalTaskId;
+  const task = id ? getTask(id) : null;
+  const hasPending = Object.keys(_pendingSaveData).length > 0;
+
+  if (task && task.recurring_origin && hasPending) {
+    const scope = await showRecurScopeDialog('如何保存这些修改？');
+    if (scope !== null) {
+      await flushSave(scope);
+    } else {
+      _pendingSaveData = {}; // discard changes
+    }
+  } else {
+    await flushSave('single');
+  }
+
   state.modalTaskId = null;
   document.getElementById('modal-backdrop').classList.remove('visible');
   document.getElementById('modal').classList.remove('visible');
+  _closingModal = false;
 }
 
 function renderModalContent(task) {
@@ -586,11 +728,9 @@ function renderModalContent(task) {
   document.getElementById('modal-title-input').value       = task.title;
   document.getElementById('modal-notes-input').value       = task.notes || '';
 
-  // Color btn tint + swatches
+  // Color btn tint (swatches updated separately in renderModalColorPicker)
   const colorBtn = document.getElementById('modal-btn-color');
-  colorBtn.style.color = task.color ? COLOR_MAP[task.color] : '';
-  document.querySelectorAll('.color-swatch').forEach(s =>
-    s.classList.toggle('selected', s.dataset.color === (task.color || '')));
+  colorBtn.style.color = task.color ? getColorHex(task.color) : '';
 
   // Recurring
   document.querySelectorAll('.recur-btn').forEach(b =>
@@ -636,23 +776,36 @@ function renderModalSubtasks(parentId) {
 let _pendingSaveData = {};
 function scheduleSave(field, value) {
   _pendingSaveData[field] = value;
+  // For recurring instances, defer save to modal close so we can ask scope once
+  const task = state.modalTaskId ? getTask(state.modalTaskId) : null;
+  if (task?.recurring_origin) return;
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(flushSave, SAVE_DELAY);
+  _saveTimer = setTimeout(() => flushSave('single'), SAVE_DELAY);
 }
 
-async function flushSave() {
+async function flushSave(scope = 'single') {
   clearTimeout(_saveTimer);
   const id = state.modalTaskId;
   if (!id || Object.keys(_pendingSaveData).length === 0) return;
   const payload = { ..._pendingSaveData };
   _pendingSaveData = {};
   if ('title' in payload && !payload.title.trim()) return;
-  try {
-    const res = await api.updateTask(id, payload);
-    const t = getTask(id);
-    if (t && res && res.task) Object.assign(t, res.task);
-    else if (t) Object.assign(t, payload);
+
+  // Apply optimistically to state
+  const task = getTask(id);
+  if (task) {
+    if (scope === 'future' && task.recurring_origin) {
+      state.tasks.filter(t => t.recurring_origin === task.recurring_origin && t.day >= task.day)
+        .forEach(t => Object.assign(t, payload));
+    } else {
+      Object.assign(task, payload);
+    }
     renderCurrentView();
+  }
+
+  try {
+    const res = await api.updateTask(id, { ...payload, scope });
+    if (task && res?.task) Object.assign(task, res.task);
   } catch (e) { showToast('保存失败', true); }
 }
 
@@ -672,10 +825,30 @@ function togglePicker(pickerId, btnId) {
 async function setColor(color) {
   const id = state.modalTaskId; if (!id) return;
   const task = getTask(id); if (!task) return;
-  task.color = color || null;
-  renderModalContent(task); renderGrid();
-  try { await api.updateTask(id, { color: color || null }); }
-  catch (e) { showToast('颜色设置失败', true); }
+
+  let scope = 'single';
+  if (task.recurring_origin) {
+    scope = await showRecurScopeDialog('如何修改颜色？');
+    if (scope === null) return;
+  } else if (task.ai_group_id) {
+    scope = await showScopeDialog('如何修改颜色？', '仅此任务', 'single', '同组所有任务', 'ai_group');
+    if (scope === null) return;
+  }
+
+  const newColor = color || null;
+  // Optimistic update in state
+  if (scope === 'future' && task.recurring_origin) {
+    state.tasks.filter(t => t.recurring_origin === task.recurring_origin && t.day >= task.day)
+      .forEach(t => { t.color = newColor; });
+  } else if (scope === 'ai_group' && task.ai_group_id) {
+    state.tasks.filter(t => t.ai_group_id === task.ai_group_id)
+      .forEach(t => { t.color = newColor; });
+  } else {
+    task.color = newColor;
+  }
+  renderModalContent(getTask(id)); renderModalColorPicker(); renderCurrentView();
+  try { await api.updateTask(id, { color: newColor, scope }); }
+  catch (e) { showToast('颜色设置失败', true); await loadWeek(true); }
 }
 
 async function setRecurring(value) {
@@ -701,9 +874,22 @@ async function setRecurring(value) {
 async function setReminder(deadline) {
   const id = state.modalTaskId; if (!id) return;
   const task = getTask(id); if (!task) return;
-  task.deadline = deadline || null;
-  task.reminded = false;
-  try { await api.updateTask(id, { deadline: deadline || null, reminded: false }); }
+
+  let scope = 'single';
+  if (task.recurring_origin) {
+    scope = await showRecurScopeDialog('如何修改提醒时间？');
+    if (scope === null) return;
+  }
+
+  const newDeadline = deadline || null;
+  if (scope === 'future' && task.recurring_origin) {
+    state.tasks.filter(t => t.recurring_origin === task.recurring_origin && t.day >= task.day)
+      .forEach(t => { t.deadline = newDeadline; t.reminded = false; });
+  } else {
+    task.deadline = newDeadline;
+    task.reminded = false;
+  }
+  try { await api.updateTask(id, { deadline: newDeadline, reminded: false, scope }); }
   catch (e) { showToast('提醒设置失败', true); }
 }
 
@@ -792,18 +978,11 @@ function buildAllTaskCard(task) {
   const main = document.createElement('div');
   main.className = 'all-task-main';
 
-  // Expand btn (only if has subtasks)
-  if (children.length > 0) {
-    const exp = document.createElement('button');
-    exp.className = 'all-expand-btn';
-    exp.dataset.action = 'expand';
-    exp.textContent = '▶';
-    main.appendChild(exp);
-  }
-
-  // Checkbox
+  // Round checkbox
   const check = document.createElement('input');
-  check.type = 'checkbox'; check.className = 'task-check'; check.dataset.id = task.id;
+  check.type = 'checkbox';
+  check.className = 'task-check task-check--round';
+  check.dataset.id = task.id;
   check.checked = task.done || allDone;
   if (children.length > 0) {
     check.classList.add('task-check--parent');
@@ -812,42 +991,24 @@ function buildAllTaskCard(task) {
   }
   main.appendChild(check);
 
-  // Body: title row + meta row
+  // Body
   const body = document.createElement('div');
   body.className = 'all-task-body';
 
-  // Title row
+  // Title row: left (title + date) | right (color dot + priority + recurring)
   const titleRow = document.createElement('div');
   titleRow.className = 'all-task-title-row';
 
-  if (task.priority && task.priority !== 'normal') {
-    const dot = document.createElement('span');
-    dot.className = 'task-priority-dot';
-    dot.dataset.priority = task.priority;
-    titleRow.appendChild(dot);
-  }
+  // Left: title + date
+  const titleLeft = document.createElement('div');
+  titleLeft.className = 'all-task-title-left';
 
   const titleEl = document.createElement('span');
-  titleEl.className = 'task-title';
+  titleEl.className = 'all-task-title-text';
+  titleEl.textContent = task.title;
   titleEl.dataset.action = 'open-modal';
-  if (task.color) {
-    const pill = document.createElement('span');
-    pill.className = 'task-title-pill';
-    pill.dataset.color = task.color;
-    pill.dataset.action = 'open-modal';
-    pill.textContent = task.title;
-    titleEl.appendChild(pill);
-  } else {
-    titleEl.textContent = task.title;
-  }
-  titleRow.appendChild(titleEl);
-  body.appendChild(titleRow);
+  titleLeft.appendChild(titleEl);
 
-  // Meta row
-  const meta = document.createElement('div');
-  meta.className = 'all-task-meta';
-
-  // Date badge
   const d = new Date(task.day + 'T00:00:00');
   const today = todayStr();
   const diff = Math.round((new Date(task.day + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
@@ -858,34 +1019,45 @@ function buildAllTaskCard(task) {
   const dateEl = document.createElement('span');
   dateEl.className = 'all-task-date';
   dateEl.textContent = dateLabel;
-  meta.appendChild(dateEl);
+  titleLeft.appendChild(dateEl);
 
-  // Priority tag
+  titleRow.appendChild(titleLeft);
+
+  // Right: color dot + priority pill + recurring pill
+  const titleRight = document.createElement('div');
+  titleRight.className = 'all-task-title-right';
+
+  if (task.color) {
+    const dot = document.createElement('span');
+    dot.className = 'all-color-dot';
+    dot.style.background = COLOR_MAP[task.color] || '#ccc';
+    titleRight.appendChild(dot);
+  }
   if (task.priority && task.priority !== 'normal') {
-    const tag = document.createElement('span');
-    tag.className = `all-task-tag all-task-tag--${task.priority}`;
-    tag.textContent = task.priority === 'urgent' ? '紧急' : '重要';
-    meta.appendChild(tag);
+    const pill = document.createElement('span');
+    pill.className = `all-priority-pill all-priority-pill--${task.priority}`;
+    pill.textContent = task.priority === 'urgent' ? '紧急' : '重要';
+    titleRight.appendChild(pill);
   }
-
-  // Subtask tag
-  if (children.length > 0) {
-    const tag = document.createElement('span');
-    tag.className = 'all-task-tag';
-    tag.textContent = `子任务 ${doneSubs}/${children.length}`;
-    meta.appendChild(tag);
-  }
-
-  // Recurring tag
   if (task.recurring) {
     const MAP = { daily: '每天', weekly: '每周', monthly: '每月' };
-    const tag = document.createElement('span');
-    tag.className = 'all-task-tag';
-    tag.textContent = MAP[task.recurring] || task.recurring;
-    meta.appendChild(tag);
+    const pill = document.createElement('span');
+    pill.className = 'all-recur-pill';
+    pill.textContent = MAP[task.recurring] || task.recurring;
+    titleRight.appendChild(pill);
   }
 
-  body.appendChild(meta);
+  titleRow.appendChild(titleRight);
+  body.appendChild(titleRow);
+
+  // Notes (always shown if present)
+  if (task.notes && task.notes.trim()) {
+    const notes = document.createElement('p');
+    notes.className = 'all-task-notes-text';
+    notes.textContent = task.notes;
+    body.appendChild(notes);
+  }
+
   main.appendChild(body);
 
   // Hover actions
@@ -897,26 +1069,26 @@ function buildAllTaskCard(task) {
 
   card.appendChild(main);
 
-  // ── Subtask list (collapsed by default)
+  // ── Subtask section (always visible)
   if (children.length > 0) {
-    const subWrap = document.createElement('div');
-    subWrap.className = 'all-subtask-list';
-    const subInner = document.createElement('div');
-    subInner.className = 'all-subtask-inner';
+    const section = document.createElement('div');
+    section.className = 'all-subtask-section';
     children.forEach(c => {
       const row = document.createElement('div');
       row.className = 'all-subtask-row' + (c.done ? ' is-done' : '');
       row.dataset.id = c.id;
       const ck = document.createElement('input');
-      ck.type = 'checkbox'; ck.className = 'task-check'; ck.dataset.id = c.id;
+      ck.type = 'checkbox';
+      ck.className = 'task-check task-check--round task-check--sm';
+      ck.dataset.id = c.id;
       ck.checked = c.done;
       const sp = document.createElement('span');
       sp.textContent = c.title;
-      row.appendChild(ck); row.appendChild(sp);
-      subInner.appendChild(row);
+      row.appendChild(ck);
+      row.appendChild(sp);
+      section.appendChild(row);
     });
-    subWrap.appendChild(subInner);
-    card.appendChild(subWrap);
+    card.appendChild(section);
   }
 
   return card;
@@ -932,8 +1104,7 @@ function renderAllTasks() {
   const filtered = applyFiltersAndSort(state.tasks);
   const total    = state.tasks.filter(t => !t.parent_id).length;
 
-  // Update page title chip via toolbar (no separate header any more)
-  // (we embed this into the toolbar new-task btn area if needed)
+  renderDashboard(filtered);
 
   if (filtered.length === 0) {
     const msg = total === 0
@@ -947,7 +1118,412 @@ function renderAllTasks() {
   filtered.forEach(t => container.appendChild(buildAllTaskCard(t)));
 }
 
+// ── Dashboard (right panel) ───────────────────────────────────────
+
+// Sine-wave path: two full cycles across 200% width so the loop is seamless
+const WAVE_PATH = (() => {
+  const W = 200, A = 8, steps = 80;
+  let d = `M0,${A}`;
+  for (let i = 1; i <= steps; i++) {
+    const x = (i / steps) * W;
+    const y = A - Math.sin((i / steps) * Math.PI * 4) * A;
+    d += ` L${x.toFixed(2)},${y.toFixed(2)}`;
+  }
+  d += ` L${W},100 L0,100 Z`;
+  return d;
+})();
+
+function getDashColorHex(key) {
+  if (key === 'none') return '#BBBBB6';
+  return getColorHex(key);
+}
+function getDashColorLabel(key) {
+  if (key === 'none') return '无标签';
+  return getColorName(key);
+}
+
+let _dashBarInit = false;
+
+function initDashboard() {
+  const right = document.getElementById('all-tasks-right');
+  if (!right || right.querySelector('#dash-wave-card')) return;
+
+  right.innerHTML = `
+    <div class="dash-card" id="dash-wave-card">
+      <div class="dash-card-title">完成进度</div>
+      <div class="dash-wave-wrap">
+        <div class="dash-wave-circle" id="dash-wave-circle">
+          <svg class="dash-wave-svg" id="dash-wave-svg"
+               viewBox="0 0 200 100" preserveAspectRatio="none"
+               xmlns="http://www.w3.org/2000/svg">
+            <path d="${WAVE_PATH}"/>
+          </svg>
+          <span class="dash-wave-pct" id="dash-wave-pct">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-card" id="dash-bar-card">
+      <div class="dash-card-title">本周日程
+        <span class="dash-bar-week" id="dash-bar-week"></span>
+      </div>
+      <canvas id="dash-bar-canvas"></canvas>
+    </div>
+
+    <div class="dash-card" id="dash-tree-card">
+      <div class="dash-card-title">模块分布</div>
+      <svg id="dash-tree-svg" class="dash-tree-svg"
+           xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+
+    <div id="dash-tooltip" class="dash-tooltip hidden"></div>
+  `;
+}
+
+function renderDashboard(filtered) {
+  if (!document.getElementById('dash-wave-card')) return;
+  renderDashWave(filtered);
+  renderDashBar();
+  renderDashTreemap(filtered);
+}
+
+function renderDashWave(tasks) {
+  const circle = document.getElementById('dash-wave-circle');
+  const label  = document.getElementById('dash-wave-pct');
+  const svg    = document.getElementById('dash-wave-svg');
+  if (!circle) return;
+
+  const total = tasks.length;
+  const done  = tasks.filter(t => t.done).length;
+  const pct   = total ? done / total : 0;
+
+  circle.style.setProperty('--wave-pct', pct);
+  label.textContent = total ? Math.round(pct * 100) + '%' : '—';
+  if (svg) {
+    svg.style.fill = pct >= 1
+      ? 'rgba(82,183,136,0.45)'
+      : 'rgba(74,144,217,0.35)';
+  }
+}
+
+function renderDashBar() {
+  const canvas = document.getElementById('dash-bar-canvas');
+  const weekLabel = document.getElementById('dash-bar-week');
+  if (!canvas) return;
+
+  // Compute Mon–Sun for current week
+  const days = Array.from({ length: 7 }, (_, i) => addDays(state.weekStart, i));
+  const today = todayStr();
+
+  // Week label
+  if (weekLabel) {
+    const fmt = d => {
+      const dt = new Date(d + 'T00:00:00');
+      return `${dt.getMonth() + 1}月${dt.getDate()}日`;
+    };
+    weekLabel.textContent = `${fmt(days[0])} – ${fmt(days[6])}`;
+  }
+
+  // Count root tasks per day (use all state.tasks, no date filter)
+  const rootTasks = state.tasks.filter(t => !t.parent_id);
+  const counts = days.map(d => {
+    const dayTasks = rootTasks.filter(t => t.day === d);
+    return { total: dayTasks.length, done: dayTasks.filter(t => t.done).length };
+  });
+
+  // HiDPI sizing
+  const dpr    = window.devicePixelRatio || 1;
+  const cssW   = canvas.parentElement.clientWidth - 32; // card padding
+  const cssH   = 110;
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+  const LABEL_H = 20;
+  const chartH  = cssH - LABEL_H;
+  const maxVal  = Math.max(...counts.map(c => c.total), 1);
+  const barW    = Math.floor((cssW / 7) * 0.55);
+  const gap     = cssW / 7;
+
+  counts.forEach((c, i) => {
+    const cx     = gap * i + gap / 2;
+    const isToday = days[i] === today;
+
+    // Total bar (background)
+    const totalH = Math.round((c.total / maxVal) * chartH * 0.85);
+    if (totalH > 0) {
+      ctx.fillStyle = isToday ? 'rgba(74,144,217,0.18)' : 'rgba(187,187,182,0.25)';
+      const x = cx - barW / 2;
+      const y = chartH - totalH;
+      _roundRect(ctx, x, y, barW, totalH, 3);
+      ctx.fill();
+    }
+
+    // Done bar (foreground)
+    const doneH = Math.round((c.done / maxVal) * chartH * 0.85);
+    if (doneH > 0) {
+      ctx.fillStyle = isToday ? 'rgba(74,144,217,0.80)' : 'rgba(74,144,217,0.50)';
+      const x = cx - barW / 2;
+      const y = chartH - doneH;
+      _roundRect(ctx, x, y, barW, doneH, 3);
+      ctx.fill();
+    }
+
+    // Day label
+    ctx.fillStyle = isToday ? '#4A90D9' : '#BBBBB6';
+    ctx.font = `${isToday ? 400 : 300} 10px var(--font, system-ui)`;
+    ctx.textAlign = 'center';
+    ctx.fillText(DAY_LABELS[i], cx, cssH - 4);
+  });
+
+  // Register mouse / click listeners once
+  if (!_dashBarInit) {
+    _dashBarInit = true;
+    canvas.addEventListener('mousemove', e => {
+      const rect   = canvas.getBoundingClientRect();
+      const x      = e.clientX - rect.left;
+      const col    = Math.floor(x / (rect.width / 7));
+      if (col < 0 || col > 6) { hideDashTooltip(); return; }
+      const c = counts[col];
+      showDashTooltip(e.clientX, e.clientY,
+        `${['周一','周二','周三','周四','周五','周六','周日'][col]}：${c.done} 已完成 / ${c.total} 个任务`);
+    });
+    canvas.addEventListener('mouseleave', hideDashTooltip);
+    canvas.addEventListener('click', e => {
+      const rect = canvas.getBoundingClientRect();
+      const x    = e.clientX - rect.left;
+      const col  = Math.floor(x / (rect.width / 7));
+      if (col >= 0 && col <= 6) {
+        state.weekStart = days[0]; // already the week start
+        switchView('week');
+      }
+    });
+  }
+}
+
+function _roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ── Treemap ──────────────────────────────────────────────────────
+
+function squarify(items, rect) {
+  // items: [{value, ...meta}] sorted descending
+  // returns: [{x, y, w, h, ...meta}]
+  if (!items.length) return [];
+
+  const total = items.reduce((s, it) => s + it.value, 0);
+  if (!total) return [];
+
+  const result = [];
+
+  function layout(its, { x, y, w, h }) {
+    if (!its.length) return;
+    if (its.length === 1) {
+      result.push({ ...its[0], x, y, w, h });
+      return;
+    }
+
+    // Try to split into two groups that minimize aspect ratio
+    const area = w * h;
+    let bestIdx = 1;
+    let bestAR  = Infinity;
+
+    for (let split = 1; split < its.length; split++) {
+      const aVal = its.slice(0, split).reduce((s, it) => s + it.value, 0);
+      const bVal = its.slice(split).reduce((s, it) => s + it.value, 0);
+      const aFrac = aVal / total;
+      const bFrac = bVal / total;
+
+      let aW, aH, bW, bH;
+      if (w >= h) {
+        aW = w * aFrac / (aVal / total) * (aVal / total); // = w * aFrac
+        // Recalculate properly:
+        aW = w * (aVal / (aVal + bVal));
+        aH = h;
+        bW = w - aW;
+        bH = h;
+      } else {
+        aW = w;
+        aH = h * (aVal / (aVal + bVal));
+        bW = w;
+        bH = h - aH;
+      }
+
+      const aAR = Math.max(aW / aH, aH / aW);
+      const bAR = Math.max(bW / bH, bH / bW);
+      const ar  = Math.max(aAR, bAR);
+      if (ar < bestAR) { bestAR = ar; bestIdx = split; }
+    }
+
+    const aItems = its.slice(0, bestIdx);
+    const bItems = its.slice(bestIdx);
+    const aVal = aItems.reduce((s, it) => s + it.value, 0);
+    const bVal = bItems.reduce((s, it) => s + it.value, 0);
+
+    let aRect, bRect;
+    if (w >= h) {
+      const aW = w * (aVal / (aVal + bVal));
+      aRect = { x,      y, w: aW,      h };
+      bRect = { x: x + aW, y, w: w - aW, h };
+    } else {
+      const aH = h * (aVal / (aVal + bVal));
+      aRect = { x, y,      w, h: aH      };
+      bRect = { x, y: y + aH, w, h: h - aH };
+    }
+
+    layout(aItems, aRect);
+    layout(bItems, bRect);
+  }
+
+  layout(items, rect);
+  return result;
+}
+
+function renderDashTreemap(tasks) {
+  const card = document.getElementById('dash-tree-card');
+  const svg  = document.getElementById('dash-tree-svg');
+  if (!svg || !card) return;
+  svg.innerHTML = '';
+
+  // Remove any existing legend
+  const oldLegend = card.querySelector('.dash-tree-legend');
+  if (oldLegend) oldLegend.remove();
+
+  // Group root tasks by color
+  const rootTasks = tasks.filter(t => !t.parent_id);
+  const groups = {};
+  for (const t of rootTasks) {
+    const key = t.color || 'none';
+    groups[key] = (groups[key] || 0) + 1;
+  }
+
+  const items = Object.entries(groups)
+    .filter(([, v]) => v > 0)
+    .map(([key, value]) => ({ key, value }))
+    .sort((a, b) => b.value - a.value);
+
+  if (!items.length) {
+    svg.setAttribute('viewBox', '0 0 1 1');
+    svg.style.height = '0';
+    return;
+  }
+
+  // Measure container width
+  const W = svg.parentElement.clientWidth - 32;
+  const H = Math.max(80, Math.round(W * 0.5));
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.height = H + 'px';
+
+  const total = items.reduce((s, it) => s + it.value, 0);
+  const tiles = squarify(items, { x: 0, y: 0, w: W, h: H });
+
+  const NS = 'http://www.w3.org/2000/svg';
+
+  tiles.forEach(tile => {
+    const hex = getDashColorHex(tile.key);
+    const pad = 2;
+    const x = tile.x + pad, y = tile.y + pad;
+    const w = tile.w - pad * 2, h = tile.h - pad * 2;
+    if (w < 4 || h < 4) return;
+
+    // Rect
+    const rect = document.createElementNS(NS, 'rect');
+    rect.setAttribute('x', x);
+    rect.setAttribute('y', y);
+    rect.setAttribute('width', w);
+    rect.setAttribute('height', h);
+    rect.setAttribute('rx', 4);
+    rect.setAttribute('fill', hex);
+    rect.setAttribute('fill-opacity', '0.55');
+    svg.appendChild(rect);
+
+    // Count number only (no color name text)
+    if (w > 28 && h > 20) {
+      const label = document.createElementNS(NS, 'text');
+      label.setAttribute('x', x + w / 2);
+      label.setAttribute('y', y + h / 2 + 1);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('dominant-baseline', 'middle');
+      label.setAttribute('font-size', Math.min(13, Math.max(10, Math.floor(Math.min(w, h) / 3))));
+      label.setAttribute('font-family', 'system-ui, sans-serif');
+      label.setAttribute('font-weight', '300');
+      label.setAttribute('fill', '#333330');
+      label.setAttribute('fill-opacity', '0.7');
+      label.setAttribute('pointer-events', 'none');
+      label.textContent = tile.value;
+      svg.appendChild(label);
+    }
+
+    // Hover
+    rect.addEventListener('mouseenter', e => {
+      const pct = Math.round((tile.value / total) * 100);
+      showDashTooltip(e.clientX, e.clientY,
+        `${getDashColorLabel(tile.key)}：${tile.value} 个任务（${pct}%）`);
+      rect.setAttribute('fill-opacity', '0.75');
+    });
+    rect.addEventListener('mousemove', e => moveDashTooltip(e.clientX, e.clientY));
+    rect.addEventListener('mouseleave', () => {
+      hideDashTooltip();
+      rect.setAttribute('fill-opacity', '0.55');
+    });
+  });
+
+  // Legend below SVG
+  const legend = document.createElement('div');
+  legend.className = 'dash-tree-legend';
+  items.forEach(it => {
+    const item = document.createElement('span');
+    item.className = 'dash-tree-legend-item';
+    const dot = document.createElement('span');
+    dot.className = 'dash-tree-legend-dot';
+    dot.style.background = getDashColorHex(it.key);
+    dot.style.opacity = '0.7';
+    const txt = document.createTextNode(`${getDashColorLabel(it.key)} ${it.value}`);
+    item.appendChild(dot);
+    item.appendChild(txt);
+    legend.appendChild(item);
+  });
+  card.appendChild(legend);
+}
+
+function showDashTooltip(x, y, text) {
+  const tip = document.getElementById('dash-tooltip');
+  if (!tip) return;
+  tip.textContent = text;
+  tip.classList.remove('hidden');
+  moveDashTooltip(x, y);
+}
+
+function moveDashTooltip(x, y) {
+  const tip = document.getElementById('dash-tooltip');
+  if (!tip) return;
+  tip.style.left = (x + 12) + 'px';
+  tip.style.top  = (y - 8)  + 'px';
+}
+
+function hideDashTooltip() {
+  const tip = document.getElementById('dash-tooltip');
+  if (tip) tip.classList.add('hidden');
+}
+
 function setupAllTasksEvents() {
+  initDashboard();
+
   const container = document.getElementById('all-tasks-list');
 
   // Click delegation on the list
@@ -955,17 +1531,6 @@ function setupAllTasksEvents() {
     if (state.modalTaskId) return;
     const card = e.target.closest('.all-task-card');
     if (!card) return;
-
-    // Expand button
-    if (e.target.closest('[data-action="expand"]')) {
-      const btn = card.querySelector('.all-expand-btn');
-      const sub = card.querySelector('.all-subtask-list');
-      if (btn && sub) {
-        btn.classList.toggle('open');
-        sub.classList.toggle('open');
-      }
-      return;
-    }
 
     // Action buttons
     const actionBtn = e.target.closest('.btn-action');
@@ -1082,10 +1647,13 @@ function switchView(v) {
   loadWeek();
 }
 
-// ── Recurring scope dialog ─────────────────────────────────────────
-function showRecurScopeDialog(msg) {
+// ── Generic scope dialog ───────────────────────────────────────────
+// Returns val1, val2, or null (cancel).
+function showScopeDialog(msg, label1, val1, label2, val2) {
   return new Promise(resolve => {
     document.getElementById('recur-scope-msg').textContent = msg;
+    document.getElementById('recur-scope-single').textContent = label1;
+    document.getElementById('recur-scope-future').textContent = label2;
     document.getElementById('recur-scope-dialog').classList.add('visible');
     document.getElementById('recur-scope-backdrop').classList.add('visible');
 
@@ -1095,11 +1663,15 @@ function showRecurScopeDialog(msg) {
       resolve(val);
     }
 
-    document.getElementById('recur-scope-single').onclick  = () => close('single');
-    document.getElementById('recur-scope-future').onclick  = () => close('future');
-    document.getElementById('recur-scope-cancel').onclick  = () => close(null);
+    document.getElementById('recur-scope-single').onclick   = () => close(val1);
+    document.getElementById('recur-scope-future').onclick   = () => close(val2);
+    document.getElementById('recur-scope-cancel').onclick   = () => close(null);
     document.getElementById('recur-scope-backdrop').onclick = () => close(null);
   });
+}
+
+function showRecurScopeDialog(msg) {
+  return showScopeDialog(msg, '仅此任务', 'single', '此任务及之后所有任务', 'future');
 }
 
 // ── Context menu ───────────────────────────────────────────────────
@@ -1410,8 +1982,18 @@ function setupEvents() {
       const val = e.target.value.trim();
       if (!val || !state.modalTaskId) return;
       e.target.value = '';
+      const parentTask = getTask(state.modalTaskId);
+      let scope = 'single';
+      if (parentTask?.recurring_origin) {
+        scope = await showScopeDialog(
+          '为循环任务添加子任务',
+          '仅此任务', 'single',
+          '此任务及之后所有任务', 'future'
+        );
+        if (!scope) return;
+      }
       try {
-        await api.createSubtask(state.modalTaskId, val);
+        await api.createSubtask(state.modalTaskId, val, scope);
         await loadWeek(true);
       } catch (err) { showToast('添加失败', true); }
     }
@@ -1451,6 +2033,12 @@ function setupEvents() {
   // ── All-tasks-specific events
   setupAllTasksEvents();
 
+  // ── AI panel events
+  setupAIPanelEvents();
+
+  // ── Settings panel events
+  setupSettingsEvents();
+
   // ── Hash navigation (browser back/forward)
   window.addEventListener('hashchange', () => {
     const newView = readView();
@@ -1464,6 +2052,13 @@ function setupEvents() {
 
 // ── Init ───────────────────────────────────────────────────────────
 async function init() {
+  // Bootstrap color styles + theme before first render
+  injectColorStyles();
+  applyTheme(getThemeMode());
+  _mq.addEventListener('change', () => {
+    if (getThemeMode() === 'system') applyTheme('system');
+  });
+
   state.view = readView();
   if (state.view === 'all') syncFilterFromURL();
 
@@ -1482,4 +2077,460 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Modal color picker ────────────────────────────────────────────
+
+function renderModalColorPicker() {
+  const picker = document.getElementById('modal-color-picker');
+  if (!picker) return;
+
+  // Keep the "no color" swatch, replace the rest
+  const noColor = picker.querySelector('[data-color=""]');
+  picker.innerHTML = '';
+  if (noColor) picker.appendChild(noColor);
+
+  const colors = getUserColors();
+  colors.forEach(({ key, hex, name }) => {
+    const s = document.createElement('span');
+    s.className = 'color-swatch';
+    s.dataset.color = key;
+    s.style.background = hex;
+    s.title = name;
+    picker.appendChild(s);
+  });
+
+  // Restore selected state for current modal task
+  const task = state.modalTaskId ? state.tasks.find(t => t.id === state.modalTaskId) : null;
+  const cur  = task ? (task.color || '') : '';
+  picker.querySelectorAll('.color-swatch').forEach(s =>
+    s.classList.toggle('selected', s.dataset.color === cur));
+}
+
+// ── Settings panel ────────────────────────────────────────────────
+
+const settingsState = { open: false };
+
+function openSettingsPanel() {
+  settingsState.open = true;
+  document.getElementById('settings-panel').classList.add('open');
+  document.getElementById('settings-overlay').classList.add('visible');
+  renderThemeOptions(getThemeMode());
+  renderColorManager();
+}
+
+function closeSettingsPanel() {
+  settingsState.open = false;
+  document.getElementById('settings-panel').classList.remove('open');
+  document.getElementById('settings-overlay').classList.remove('visible');
+}
+
+function toggleSettingsPanel() {
+  if (settingsState.open) closeSettingsPanel();
+  else openSettingsPanel();
+}
+
+function renderThemeOptions(activeMode) {
+  document.querySelectorAll('.theme-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.themeVal === activeMode);
+  });
+}
+
+function renderColorManager() {
+  const mgr = document.getElementById('color-manager');
+  if (!mgr) return;
+  mgr.innerHTML = '';
+
+  const colors = getUserColors();
+  colors.forEach((color, idx) => {
+    const row = document.createElement('div');
+    row.className = 'color-mgr-row';
+
+    // Color swatch (click opens native color picker)
+    const swatchWrap = document.createElement('label');
+    swatchWrap.className = 'color-mgr-swatch';
+    swatchWrap.style.background = color.hex;
+    swatchWrap.title = '点击更改颜色';
+    const colorInput = document.createElement('input');
+    colorInput.type  = 'color';
+    colorInput.value = color.hex;
+    colorInput.addEventListener('input', e => {
+      swatchWrap.style.background = e.target.value;
+    });
+    colorInput.addEventListener('change', e => {
+      const colors2 = getUserColors();
+      colors2[idx].hex = e.target.value;
+      saveUserColors(colors2);
+      injectColorStyles();
+      renderDashboard(applyFiltersAndSort(state.tasks));
+    });
+    swatchWrap.appendChild(colorInput);
+    row.appendChild(swatchWrap);
+
+    // Name input
+    const nameInput = document.createElement('input');
+    nameInput.type      = 'text';
+    nameInput.className = 'color-mgr-name';
+    nameInput.value     = color.name;
+    nameInput.placeholder = '标签名称';
+    nameInput.addEventListener('change', e => {
+      const colors2 = getUserColors();
+      colors2[idx].name = e.target.value.trim() || color.key;
+      saveUserColors(colors2);
+      renderModalColorPicker();
+      renderDashboard(applyFiltersAndSort(state.tasks));
+    });
+    row.appendChild(nameInput);
+
+    // Key label (fixed for built-ins)
+    const keyLabel = document.createElement('span');
+    keyLabel.className   = 'color-mgr-key';
+    keyLabel.textContent = color.key;
+    row.appendChild(keyLabel);
+
+    // Delete button (disabled for built-ins)
+    const delBtn = document.createElement('button');
+    delBtn.className = 'color-mgr-del';
+    delBtn.title     = '删除';
+    delBtn.innerHTML = '✕';
+    const isBuiltin = BUILTIN_COLORS.some(b => b.key === color.key);
+    if (isBuiltin) {
+      delBtn.disabled = true;
+    } else {
+      delBtn.addEventListener('click', () => {
+        const colors2 = getUserColors().filter(c => c.key !== color.key);
+        saveUserColors(colors2);
+        injectColorStyles();
+        renderColorManager();
+        renderModalColorPicker();
+        renderDashboard(applyFiltersAndSort(state.tasks));
+      });
+    }
+    row.appendChild(delBtn);
+
+    mgr.appendChild(row);
+  });
+}
+
+function addCustomColor() {
+  const colors = getUserColors();
+  // Generate a unique key
+  let n = 1;
+  while (colors.find(c => c.key === `custom${n}`)) n++;
+  const key  = `custom${n}`;
+  const hue  = Math.round(Math.random() * 360);
+  const hex  = hslToHex(hue, 60, 58);
+  colors.push({ key, hex, name: `标签${n}` });
+  saveUserColors(colors);
+  injectColorStyles();
+  renderColorManager();
+  renderModalColorPicker();
+}
+
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function setupSettingsEvents() {
+  document.getElementById('btn-settings').addEventListener('click', toggleSettingsPanel);
+  document.getElementById('settings-close').addEventListener('click', closeSettingsPanel);
+  document.getElementById('settings-overlay').addEventListener('click', closeSettingsPanel);
+
+  document.getElementById('theme-options').addEventListener('click', e => {
+    const opt = e.target.closest('.theme-option');
+    if (opt) setThemeMode(opt.dataset.themeVal);
+  });
+
+  document.getElementById('color-add-btn').addEventListener('click', addCustomColor);
+}
+
+// ── AI Panel ────────────────────────────────────────────────────────
+
+const PRIORITY_LABELS = { urgent: '紧急', important: '重要', normal: '普通' };
+const PRIORITY_COLORS = { urgent: '#E8524A', important: '#F5A623', normal: '#BBBBB6' };
+
+const aiState = {
+  open:      false,
+  subtasks:  [],   // [{title, estimated_time, priority, suggested_date, selected}]
+  lastInput: '',
+};
+
+function openAIPanel() {
+  aiState.open = true;
+  document.getElementById('ai-panel').classList.add('open');
+  document.getElementById('ai-overlay').classList.add('visible');
+  setTimeout(() => document.getElementById('ai-task-input').focus(), 280);
+}
+
+function closeAIPanel() {
+  aiState.open = false;
+  document.getElementById('ai-panel').classList.remove('open');
+  document.getElementById('ai-overlay').classList.remove('visible');
+  // Reset state on close (next open starts fresh)
+  aiState.subtasks  = [];
+  aiState.lastInput = '';
+  document.getElementById('ai-task-input').value = '';
+  showAISection('ai-input-section');
+}
+
+function toggleAIPanel() {
+  if (aiState.open) closeAIPanel();
+  else openAIPanel();
+}
+
+function showAISection(id) {
+  ['ai-input-section', 'ai-loading', 'ai-error', 'ai-result'].forEach(sid => {
+    const el = document.getElementById(sid);
+    if (el) el.classList.toggle('hidden', sid !== id);
+  });
+}
+
+async function runDecompose() {
+  const input = document.getElementById('ai-task-input').value.trim();
+  if (!input) { document.getElementById('ai-task-input').focus(); return; }
+  aiState.lastInput = input;
+  showAISection('ai-loading');
+
+  try {
+    const result = await api.call('POST', '/api/ai/decompose', { task_title: input });
+    if (!result.success) {
+      document.getElementById('ai-error-msg').textContent = result.error;
+      showAISection('ai-error');
+      return;
+    }
+    aiState.subtasks = result.subtasks.map(s => ({ ...s, selected: true }));
+    renderAIResult(input);
+    showAISection('ai-result');
+  } catch (e) {
+    document.getElementById('ai-error-msg').textContent = '请求失败：' + e.message;
+    showAISection('ai-error');
+  }
+}
+
+function renderAIResult(title) {
+  document.getElementById('ai-result-task-name').textContent = '📝 ' + title;
+  const list = document.getElementById('ai-subtasks');
+  list.innerHTML = '';
+  aiState.subtasks.forEach((s, i) => list.appendChild(buildAISubtaskCard(s, i)));
+}
+
+function buildAISubtaskCard(subtask, idx) {
+  const card = document.createElement('div');
+  card.className = 'ai-subtask-card' + (subtask.selected ? '' : ' unselected');
+  card.dataset.idx = idx;
+
+  const main = document.createElement('div');
+  main.className = 'ai-subtask-main';
+
+  // Checkbox
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'ai-subtask-check';
+  check.checked = subtask.selected;
+  check.addEventListener('change', () => {
+    aiState.subtasks[idx].selected = check.checked;
+    card.classList.toggle('unselected', !check.checked);
+  });
+  main.appendChild(check);
+
+  // Content
+  const content = document.createElement('div');
+  content.className = 'ai-subtask-content';
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'ai-subtask-title';
+  titleEl.textContent = subtask.title;
+  content.appendChild(titleEl);
+
+  const meta = document.createElement('div');
+  meta.className = 'ai-subtask-meta';
+  if (subtask.estimated_time) {
+    const t = document.createElement('span');
+    t.className = 'ai-meta-item';
+    t.textContent = '⏱ ' + subtask.estimated_time;
+    meta.appendChild(t);
+  }
+  if (subtask.priority && subtask.priority !== 'normal') {
+    const p = document.createElement('span');
+    p.className = 'ai-meta-item ai-meta-priority';
+    p.style.color = PRIORITY_COLORS[subtask.priority];
+    p.textContent = (subtask.priority === 'urgent' ? '🔴' : '🟡') + ' ' + PRIORITY_LABELS[subtask.priority];
+    meta.appendChild(p);
+  }
+  if (subtask.suggested_date) {
+    const d = new Date(subtask.suggested_date + 'T00:00:00');
+    const ds = document.createElement('span');
+    ds.className = 'ai-meta-item';
+    ds.textContent = `📅 ${d.getMonth() + 1}月${d.getDate()}日`;
+    meta.appendChild(ds);
+  }
+  content.appendChild(meta);
+  main.appendChild(content);
+
+  // Edit button
+  const editBtn = document.createElement('button');
+  editBtn.className = 'ai-edit-btn';
+  editBtn.textContent = '编辑';
+  editBtn.addEventListener('click', () => showAIEditForm(card, idx));
+  main.appendChild(editBtn);
+
+  card.appendChild(main);
+  return card;
+}
+
+function showAIEditForm(card, idx) {
+  const s = aiState.subtasks[idx];
+  card.querySelector('.ai-subtask-main').style.display = 'none';
+
+  const form = document.createElement('div');
+  form.className = 'ai-edit-form';
+  form.innerHTML = `
+    <div class="ai-edit-field">
+      <label>标题</label>
+      <input class="ai-edit-input ai-edit-title" type="text" value="${escHtml(s.title)}" />
+    </div>
+    <div class="ai-edit-field">
+      <label>预估时间</label>
+      <input class="ai-edit-input ai-edit-time" type="text"
+             value="${escHtml(s.estimated_time || '')}" placeholder="如：2小时" />
+    </div>
+    <div class="ai-edit-field ai-edit-priority-row">
+      <label>优先级</label>
+      <div class="ai-priority-btns">
+        <button class="ai-priority-opt${s.priority === 'urgent'    ? ' active' : ''}" data-p="urgent">紧急</button>
+        <button class="ai-priority-opt${s.priority === 'important' ? ' active' : ''}" data-p="important">重要</button>
+        <button class="ai-priority-opt${(!s.priority || s.priority === 'normal') ? ' active' : ''}" data-p="normal">普通</button>
+      </div>
+    </div>
+    <div class="ai-edit-field">
+      <label>日期</label>
+      <input class="ai-edit-input ai-edit-date" type="date" value="${s.suggested_date || ''}" />
+    </div>
+    <div class="ai-edit-actions">
+      <button class="ai-save-btn">保存</button>
+      <button class="ai-cancel-btn">取消</button>
+    </div>`;
+
+  form.querySelectorAll('.ai-priority-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      form.querySelectorAll('.ai-priority-opt').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  form.querySelector('.ai-save-btn').addEventListener('click', () => {
+    aiState.subtasks[idx].title          = form.querySelector('.ai-edit-title').value.trim() || s.title;
+    aiState.subtasks[idx].estimated_time = form.querySelector('.ai-edit-time').value.trim();
+    aiState.subtasks[idx].priority       = form.querySelector('.ai-priority-opt.active')?.dataset.p || 'normal';
+    aiState.subtasks[idx].suggested_date = form.querySelector('.ai-edit-date').value;
+    // Replace card in DOM
+    const list    = document.getElementById('ai-subtasks');
+    const newCard = buildAISubtaskCard(aiState.subtasks[idx], idx);
+    list.replaceChild(newCard, card);
+  });
+
+  form.querySelector('.ai-cancel-btn').addEventListener('click', () => {
+    form.remove();
+    card.querySelector('.ai-subtask-main').style.display = '';
+  });
+
+  card.appendChild(form);
+}
+
+function parseEstimatedMins(str) {
+  if (!str) return null;
+  const h = str.match(/(\d+(?:\.\d+)?)\s*小时/);
+  const m = str.match(/(\d+)\s*分钟/);
+  const d = str.match(/(\d+)\s*天/);
+  if (h) return Math.round(parseFloat(h[1]) * 60);
+  if (m) return parseInt(m[1]);
+  if (d) return parseInt(d[1]) * 480;
+  return null;
+}
+
+async function addAllToSchedule() {
+  const selected = aiState.subtasks.filter(s => s.selected);
+  if (!selected.length) { showToast('请至少选择一个任务', true); return; }
+
+  const btn = document.getElementById('ai-add-all-btn');
+  btn.disabled    = true;
+  btn.textContent = '添加中…';
+
+  // Group subtasks by suggested_date
+  const byDate = new Map();
+  for (const s of selected) {
+    const day = s.suggested_date || todayStr();
+    if (!byDate.has(day)) byDate.set(day, []);
+    byDate.get(day).push(s);
+  }
+
+  const parentTitle = aiState.lastInput;
+  const groupId = crypto.randomUUID();
+
+  try {
+    let subCount = 0;
+    for (const [day, subs] of byDate) {
+      // Build notes from estimated times
+      const notes = subs
+        .filter(s => s.estimated_time)
+        .map(s => `${s.title}：${s.estimated_time}`)
+        .join('\n');
+
+      // Create parent task for this date
+      const parent = await api.createTask({
+        title: parentTitle,
+        day,
+        notes,
+        ai_group_id: groupId,
+      });
+
+      // Create each subtask under this parent
+      for (const s of subs) {
+        await api.call('POST', `/api/tasks/${parent.id}/subtasks`, {
+          title:    s.title,
+          priority: s.priority || 'normal',
+        });
+        subCount++;
+      }
+    }
+    showToast(`已添加 ${byDate.size} 个父任务、${subCount} 个子任务到日程`);
+    closeAIPanel();
+    if (state.view === 'week') {
+      await loadWeek();
+    } else {
+      switchView('week');
+    }
+  } catch (e) {
+    showToast('添加失败：' + e.message, true);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '全部添加到日程';
+  }
+}
+
+function setupAIPanelEvents() {
+  document.getElementById('btn-ai').addEventListener('click', toggleAIPanel);
+  document.getElementById('ai-panel-close').addEventListener('click', closeAIPanel);
+  document.getElementById('ai-overlay').addEventListener('click', closeAIPanel);
+
+  document.getElementById('ai-decompose-btn').addEventListener('click', runDecompose);
+  document.getElementById('ai-task-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runDecompose();
+  });
+
+  document.getElementById('ai-retry-btn').addEventListener('click', runDecompose);
+  document.getElementById('ai-back-btn').addEventListener('click', () => showAISection('ai-input-section'));
+
+  document.getElementById('ai-add-all-btn').addEventListener('click', addAllToSchedule);
+  document.getElementById('ai-regen-btn').addEventListener('click', () => {
+    document.getElementById('ai-task-input').value = aiState.lastInput;
+    runDecompose();
+  });
+}
 
