@@ -290,6 +290,15 @@ def reorder_tasks():
     return jsonify({'ok': True})
 
 
+# ── GET /api/tasks/all ───────────────────────────────────────────────────────
+
+@app.route('/api/tasks/all', methods=['GET'])
+def get_all_tasks():
+    tasks = load_tasks()
+    tasks.sort(key=lambda t: (t.get('day', ''), t.get('order', 0)))
+    return jsonify(tasks)
+
+
 if __name__ == '__main__':
     from scheduler import start_scheduler
     start_scheduler(broadcast)

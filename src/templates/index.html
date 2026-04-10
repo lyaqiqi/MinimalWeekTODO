@@ -7,18 +7,124 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+
+<!-- ── Sidebar ── -->
+<nav id="sidebar">
+  <div class="sidebar-top">
+    <button class="sidebar-item active" data-view="week" title="周视图">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="2" y="3" width="12" height="11" rx="1.5"/>
+        <path d="M5 3V1.5M11 3V1.5M2 7h12"/>
+      </svg>
+    </button>
+    <button class="sidebar-item" data-view="all" title="所有任务">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <line x1="5.5" y1="4" x2="13" y2="4"/>
+        <line x1="5.5" y1="8" x2="13" y2="8"/>
+        <line x1="5.5" y1="12" x2="13" y2="12"/>
+        <circle cx="2.5" cy="4" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="2.5" cy="8" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="2.5" cy="12" r="1" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+  </div>
+  <div class="sidebar-bottom">
+    <button class="sidebar-item sidebar-item--disabled" title="设置（即将推出）">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="8" cy="8" r="2.5"/>
+        <path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>
+      </svg>
+    </button>
+  </div>
+</nav>
+
 <div id="app">
 
-  <!-- ── Week header ── -->
+  <!-- ── Week view ── -->
   <header id="week-header">
     <button id="btn-prev" class="nav-btn" title="上一周">‹</button>
     <h1 id="week-label"></h1>
     <button id="btn-today" class="nav-btn today-btn">今日</button>
     <button id="btn-next" class="nav-btn" title="下一周">›</button>
   </header>
-
-  <!-- ── 6-column week grid ── -->
   <main id="week-grid"></main>
+
+  <!-- ── All-tasks view ── -->
+  <div id="all-tasks-view" hidden>
+
+    <!-- toolbar -->
+    <div id="all-toolbar">
+      <div id="all-filters">
+        <!-- Status chips -->
+        <div class="filter-group">
+          <button class="filter-chip active" data-filter="status" data-value="">全部</button>
+          <button class="filter-chip" data-filter="status" data-value="todo">待办</button>
+          <button class="filter-chip" data-filter="status" data-value="done">已完成</button>
+        </div>
+        <div class="filter-sep"></div>
+        <!-- Priority chips -->
+        <div class="filter-group">
+          <button class="filter-chip active" data-filter="priority" data-value="">全部</button>
+          <button class="filter-chip" data-filter="priority" data-value="urgent">
+            <span class="fchip-dot" style="background:#E8524A"></span>紧急
+          </button>
+          <button class="filter-chip" data-filter="priority" data-value="important">
+            <span class="fchip-dot" style="background:#F5A623"></span>重要
+          </button>
+          <button class="filter-chip" data-filter="priority" data-value="normal">普通</button>
+        </div>
+        <div class="filter-sep"></div>
+        <!-- Date range chips -->
+        <div class="filter-group">
+          <button class="filter-chip active" data-filter="date" data-value="">全部日期</button>
+          <button class="filter-chip" data-filter="date" data-value="today">今天</button>
+          <button class="filter-chip" data-filter="date" data-value="week">本周</button>
+          <button class="filter-chip" data-filter="date" data-value="month">本月</button>
+        </div>
+      </div>
+
+      <div id="all-toolbar-right">
+        <!-- Search -->
+        <div id="all-search-wrap">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="6.5" cy="6.5" r="4"/>
+            <line x1="9.5" y1="9.5" x2="13.5" y2="13.5"/>
+          </svg>
+          <input id="all-search" type="text" placeholder="搜索任务…" autocomplete="off" />
+        </div>
+        <!-- Sort -->
+        <select id="all-sort">
+          <option value="date_asc">日期 ↑ 最近</option>
+          <option value="date_desc">日期 ↓ 最远</option>
+          <option value="priority">优先级</option>
+        </select>
+        <!-- New task -->
+        <button id="all-btn-new">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/>
+          </svg>
+          新增任务
+        </button>
+      </div>
+    </div>
+
+    <!-- task list -->
+    <div id="all-tasks-list"></div>
+
+    <!-- new task quick-add panel -->
+    <div id="all-quick-add" class="hidden">
+      <input id="all-qa-title" type="text" placeholder="任务名称…" autocomplete="off" />
+      <input id="all-qa-date"  type="date" />
+      <select id="all-qa-priority">
+        <option value="normal">普通</option>
+        <option value="important">重要</option>
+        <option value="urgent">紧急</option>
+      </select>
+      <button id="all-qa-submit">添加</button>
+      <button id="all-qa-cancel">取消</button>
+    </div>
+
+  </div>
 
 </div><!-- #app -->
 

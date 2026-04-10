@@ -12,6 +12,7 @@ const DELETE_GRACE = 5000;
 
 // ── State ──────────────────────────────────────────────────────────
 const state = {
+  view:           'week',        // updated in init()
   weekStart:      readHashWeek(),
   tasks:          [],
   modalTaskId:    null,
@@ -33,6 +34,10 @@ function readHashWeek() {
 
 function writeHashWeek(ws) {
   history.replaceState(null, '', `#week=${ws}`);
+}
+
+function readView() {
+  return location.hash === '#all' ? 'all' : 'week';
 }
 
 // ── Utility ────────────────────────────────────────────────────────
@@ -100,14 +105,24 @@ const api = {
 // ── Data loading ───────────────────────────────────────────────────
 async function loadWeek(keepModal = false) {
   try {
-    state.tasks = await api.getTasks(state.weekStart);
-    renderGrid();
-    updateWeekLabel();
+    if (state.view === 'all') {
+      state.tasks = await api.call('GET', '/api/tasks/all');
+      renderAllTasks();
+    } else {
+      state.tasks = await api.getTasks(state.weekStart);
+      renderGrid();
+      updateWeekLabel();
+    }
     if (keepModal && state.modalTaskId) {
       const t = getTask(state.modalTaskId);
       if (t) renderModalContent(t);
     }
   } catch (e) { showToast('加载失败：' + e.message, true); }
+}
+
+function renderCurrentView() {
+  if (state.view === 'all') renderAllTasks();
+  else renderGrid();
 }
 
 // ── Week header label ──────────────────────────────────────────────
@@ -387,7 +402,7 @@ async function toggleDone(taskId, done) {
     const par  = getTask(task.parent_id);
     if (par) par.done = sibs.every(s => s.done);
   }
-  renderGrid();
+  renderCurrentView();
   try {
     const res = await api.updateTask(taskId, { done });
     // If server spawned a recurring next task, add it to local state
@@ -408,7 +423,7 @@ async function setPriority(taskId, priority) {
   const task = getTask(taskId);
   if (!task) return;
   task.priority = priority;
-  renderGrid();
+  renderCurrentView();
   if (state.modalTaskId === taskId) {
     document.querySelectorAll('.priority-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.priority === priority));
@@ -443,7 +458,7 @@ async function deleteTask(taskId) {
     state.tasks = state.tasks.filter(t =>
       !(t.recurring_origin === originId && t.day >= fromDay));
     if (state.modalTaskId === taskId) closeModal();
-    renderGrid();
+    renderCurrentView();
     try { await api.call('DELETE', `/api/tasks/${taskId}?scope=future`); }
     catch { showToast('删除失败', true); await loadWeek(true); }
     return;
@@ -464,13 +479,13 @@ async function deleteTask(taskId) {
   const snapshot = [...state.tasks];
   state.tasks = state.tasks.filter(t => !toRemove.has(t.id));
   if (state.modalTaskId && toRemove.has(state.modalTaskId)) closeModal();
-  renderGrid();
+  renderCurrentView();
 
   const toast = showUndoToast(`已删除"${task.title.slice(0, 18)}"`, () => {
     clearTimeout(entry.timer);
     state.pendingDeletes.delete(taskId);
     state.tasks = snapshot;
-    renderGrid();
+    renderCurrentView();
   });
 
   const entry = {
@@ -637,7 +652,7 @@ async function flushSave() {
     const t = getTask(id);
     if (t && res && res.task) Object.assign(t, res.task);
     else if (t) Object.assign(t, payload);
-    renderGrid();
+    renderCurrentView();
   } catch (e) { showToast('保存失败', true); }
 }
 
@@ -690,6 +705,381 @@ async function setReminder(deadline) {
   task.reminded = false;
   try { await api.updateTask(id, { deadline: deadline || null, reminded: false }); }
   catch (e) { showToast('提醒设置失败', true); }
+}
+
+// ── All-tasks view ─────────────────────────────────────────────────
+
+// Filter / sort state (persisted in URL search params)
+const allFilter = {
+  status:   '',    // '' | 'todo' | 'done'
+  priority: '',    // '' | 'urgent' | 'important' | 'normal'
+  date:     '',    // '' | 'today' | 'week' | 'month'
+  search:   '',
+  sort:     'date_asc',  // 'date_asc' | 'date_desc' | 'priority'
+};
+
+function syncFilterFromURL() {
+  const p = new URLSearchParams(location.search);
+  if (p.has('status'))   allFilter.status   = p.get('status');
+  if (p.has('priority')) allFilter.priority = p.get('priority');
+  if (p.has('date'))     allFilter.date     = p.get('date');
+  if (p.has('search'))   allFilter.search   = p.get('search');
+  if (p.has('sort'))     allFilter.sort     = p.get('sort');
+}
+
+function pushFilterToURL() {
+  const p = new URLSearchParams();
+  if (allFilter.status)   p.set('status',   allFilter.status);
+  if (allFilter.priority) p.set('priority', allFilter.priority);
+  if (allFilter.date)     p.set('date',     allFilter.date);
+  if (allFilter.search)   p.set('search',   allFilter.search);
+  if (allFilter.sort !== 'date_asc') p.set('sort', allFilter.sort);
+  const qs = p.toString();
+  history.replaceState(null, '', '#all' + (qs ? '?' + qs : ''));
+}
+
+const PRIORITY_ORDER = { urgent: 0, important: 1, normal: 2 };
+
+function applyFiltersAndSort(tasks) {
+  const today   = todayStr();
+  const monday  = state.weekStart; // current week start
+  const mon1st  = today.slice(0, 8) + '01'; // first of month
+
+  let list = tasks.filter(t => !t.parent_id);
+
+  if (allFilter.status === 'todo')  list = list.filter(t => !t.done);
+  if (allFilter.status === 'done')  list = list.filter(t =>  t.done);
+
+  if (allFilter.priority) list = list.filter(t => (t.priority || 'normal') === allFilter.priority);
+
+  if (allFilter.date === 'today') list = list.filter(t => t.day === today);
+  if (allFilter.date === 'week')  list = list.filter(t => t.day >= monday && t.day <= addDays(monday, 6));
+  if (allFilter.date === 'month') list = list.filter(t => t.day >= mon1st && t.day <= today.slice(0,8) + '31');
+
+  if (allFilter.search) {
+    const q = allFilter.search.toLowerCase();
+    list = list.filter(t => t.title.toLowerCase().includes(q));
+  }
+
+  if (allFilter.sort === 'date_asc')  list.sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : a.order - b.order);
+  if (allFilter.sort === 'date_desc') list.sort((a, b) => a.day > b.day ? -1 : a.day < b.day ? 1 : b.order - a.order);
+  if (allFilter.sort === 'priority')  list.sort((a, b) => (PRIORITY_ORDER[a.priority||'normal'] - PRIORITY_ORDER[b.priority||'normal']) || (a.day < b.day ? -1 : 1));
+
+  return list;
+}
+
+function syncFilterUI() {
+  document.querySelectorAll('.filter-chip').forEach(el => {
+    el.classList.toggle('active', el.dataset.value === allFilter[el.dataset.filter]);
+  });
+  const sortEl = document.getElementById('all-sort');
+  if (sortEl) sortEl.value = allFilter.sort;
+  const searchEl = document.getElementById('all-search');
+  if (searchEl) searchEl.value = allFilter.search;
+}
+
+function buildAllTaskCard(task) {
+  const children = getChildren(task.id);
+  const doneSubs = children.filter(c => c.done).length;
+  const allDone  = children.length > 0 && doneSubs === children.length;
+  const someDone = children.length > 0 && doneSubs > 0 && !allDone;
+
+  const card = document.createElement('div');
+  card.className = 'all-task-card' + (task.done ? ' is-done' : '');
+  card.dataset.id = task.id;
+
+  // ── Main row
+  const main = document.createElement('div');
+  main.className = 'all-task-main';
+
+  // Expand btn (only if has subtasks)
+  if (children.length > 0) {
+    const exp = document.createElement('button');
+    exp.className = 'all-expand-btn';
+    exp.dataset.action = 'expand';
+    exp.textContent = '▶';
+    main.appendChild(exp);
+  }
+
+  // Checkbox
+  const check = document.createElement('input');
+  check.type = 'checkbox'; check.className = 'task-check'; check.dataset.id = task.id;
+  check.checked = task.done || allDone;
+  if (children.length > 0) {
+    check.classList.add('task-check--parent');
+    if (someDone) check.classList.add('task-check--partial');
+    check.disabled = true;
+  }
+  main.appendChild(check);
+
+  // Body: title row + meta row
+  const body = document.createElement('div');
+  body.className = 'all-task-body';
+
+  // Title row
+  const titleRow = document.createElement('div');
+  titleRow.className = 'all-task-title-row';
+
+  if (task.priority && task.priority !== 'normal') {
+    const dot = document.createElement('span');
+    dot.className = 'task-priority-dot';
+    dot.dataset.priority = task.priority;
+    titleRow.appendChild(dot);
+  }
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'task-title';
+  titleEl.dataset.action = 'open-modal';
+  if (task.color) {
+    const pill = document.createElement('span');
+    pill.className = 'task-title-pill';
+    pill.dataset.color = task.color;
+    pill.dataset.action = 'open-modal';
+    pill.textContent = task.title;
+    titleEl.appendChild(pill);
+  } else {
+    titleEl.textContent = task.title;
+  }
+  titleRow.appendChild(titleEl);
+  body.appendChild(titleRow);
+
+  // Meta row
+  const meta = document.createElement('div');
+  meta.className = 'all-task-meta';
+
+  // Date badge
+  const d = new Date(task.day + 'T00:00:00');
+  const today = todayStr();
+  const diff = Math.round((new Date(task.day + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+  let dateLabel = `${d.getMonth()+1}月${d.getDate()}日 ${WEEKDAYS_CN[dayIndex(task.day)]}`;
+  if (diff === 0) dateLabel = '今天';
+  else if (diff === 1) dateLabel = '明天';
+  else if (diff === -1) dateLabel = '昨天';
+  const dateEl = document.createElement('span');
+  dateEl.className = 'all-task-date';
+  dateEl.textContent = dateLabel;
+  meta.appendChild(dateEl);
+
+  // Priority tag
+  if (task.priority && task.priority !== 'normal') {
+    const tag = document.createElement('span');
+    tag.className = `all-task-tag all-task-tag--${task.priority}`;
+    tag.textContent = task.priority === 'urgent' ? '紧急' : '重要';
+    meta.appendChild(tag);
+  }
+
+  // Subtask tag
+  if (children.length > 0) {
+    const tag = document.createElement('span');
+    tag.className = 'all-task-tag';
+    tag.textContent = `子任务 ${doneSubs}/${children.length}`;
+    meta.appendChild(tag);
+  }
+
+  // Recurring tag
+  if (task.recurring) {
+    const MAP = { daily: '每天', weekly: '每周', monthly: '每月' };
+    const tag = document.createElement('span');
+    tag.className = 'all-task-tag';
+    tag.textContent = MAP[task.recurring] || task.recurring;
+    meta.appendChild(tag);
+  }
+
+  body.appendChild(meta);
+  main.appendChild(body);
+
+  // Hover actions
+  const acts = document.createElement('div');
+  acts.className = 'all-task-actions';
+  acts.appendChild(makeActionBtn('reminder', svgBell(), '设置提醒'));
+  acts.appendChild(makeActionBtn('delete', svgTrash(), '删除', 'btn-action--delete'));
+  main.appendChild(acts);
+
+  card.appendChild(main);
+
+  // ── Subtask list (collapsed by default)
+  if (children.length > 0) {
+    const subWrap = document.createElement('div');
+    subWrap.className = 'all-subtask-list';
+    const subInner = document.createElement('div');
+    subInner.className = 'all-subtask-inner';
+    children.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'all-subtask-row' + (c.done ? ' is-done' : '');
+      row.dataset.id = c.id;
+      const ck = document.createElement('input');
+      ck.type = 'checkbox'; ck.className = 'task-check'; ck.dataset.id = c.id;
+      ck.checked = c.done;
+      const sp = document.createElement('span');
+      sp.textContent = c.title;
+      row.appendChild(ck); row.appendChild(sp);
+      subInner.appendChild(row);
+    });
+    subWrap.appendChild(subInner);
+    card.appendChild(subWrap);
+  }
+
+  return card;
+}
+
+function renderAllTasks() {
+  const container = document.getElementById('all-tasks-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  syncFilterUI();
+
+  const filtered = applyFiltersAndSort(state.tasks);
+  const total    = state.tasks.filter(t => !t.parent_id).length;
+
+  // Update page title chip via toolbar (no separate header any more)
+  // (we embed this into the toolbar new-task btn area if needed)
+
+  if (filtered.length === 0) {
+    const msg = total === 0
+      ? '暂无任务，点击「新增任务」创建第一个任务'
+      : '没有符合筛选条件的任务';
+    container.innerHTML = `<div class="all-tasks-empty">${msg}</div>`;
+    return;
+  }
+
+  // Show as flat list (sorted) — no day-group headers when sorted by priority
+  filtered.forEach(t => container.appendChild(buildAllTaskCard(t)));
+}
+
+function setupAllTasksEvents() {
+  const container = document.getElementById('all-tasks-list');
+
+  // Click delegation on the list
+  container.addEventListener('click', e => {
+    if (state.modalTaskId) return;
+    const card = e.target.closest('.all-task-card');
+    if (!card) return;
+
+    // Expand button
+    if (e.target.closest('[data-action="expand"]')) {
+      const btn = card.querySelector('.all-expand-btn');
+      const sub = card.querySelector('.all-subtask-list');
+      if (btn && sub) {
+        btn.classList.toggle('open');
+        sub.classList.toggle('open');
+      }
+      return;
+    }
+
+    // Action buttons
+    const actionBtn = e.target.closest('.btn-action');
+    if (actionBtn) {
+      e.stopPropagation();
+      const a = actionBtn.dataset.action;
+      if (a === 'delete')  { deleteTask(card.dataset.id); return; }
+      if (a === 'reminder') {
+        openModal(card.dataset.id);
+        setTimeout(() => document.getElementById('modal-btn-reminder').click(), 50);
+        return;
+      }
+    }
+
+    // Open modal on title click
+    if (e.target.closest('[data-action="open-modal"]')) {
+      openModal(card.dataset.id); return;
+    }
+  });
+
+  // Checkbox changes (root tasks and subtasks)
+  container.addEventListener('change', e => {
+    if (!e.target.classList.contains('task-check') || e.target.disabled) return;
+    const row = e.target.closest('[data-id]');
+    if (row) toggleDone(row.dataset.id, e.target.checked);
+  });
+
+  // Right-click
+  container.addEventListener('contextmenu', e => {
+    const card = e.target.closest('.all-task-card');
+    if (card) { e.preventDefault(); showContextMenu(e.clientX, e.clientY, card.dataset.id); }
+  });
+
+  // ── Filter chips
+  document.getElementById('all-filters').addEventListener('click', e => {
+    const chip = e.target.closest('.filter-chip');
+    if (!chip) return;
+    allFilter[chip.dataset.filter] = chip.dataset.value;
+    pushFilterToURL();
+    renderAllTasks();
+  });
+
+  // ── Sort
+  document.getElementById('all-sort').addEventListener('change', e => {
+    allFilter.sort = e.target.value;
+    pushFilterToURL();
+    renderAllTasks();
+  });
+
+  // ── Search (debounced)
+  let _searchTimer;
+  document.getElementById('all-search').addEventListener('input', e => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      allFilter.search = e.target.value.trim();
+      pushFilterToURL();
+      renderAllTasks();
+    }, 250);
+  });
+
+  // ── New task button
+  document.getElementById('all-btn-new').addEventListener('click', () => {
+    const qa = document.getElementById('all-quick-add');
+    qa.classList.remove('hidden');
+    const dateInput = document.getElementById('all-qa-date');
+    if (!dateInput.value) dateInput.value = todayStr();
+    document.getElementById('all-qa-title').focus();
+  });
+
+  // ── Quick-add submit
+  document.getElementById('all-qa-submit').addEventListener('click', submitQuickAdd);
+  document.getElementById('all-qa-title').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitQuickAdd();
+    if (e.key === 'Escape') closeQuickAdd();
+  });
+  document.getElementById('all-qa-cancel').addEventListener('click', closeQuickAdd);
+}
+
+async function submitQuickAdd() {
+  const title    = document.getElementById('all-qa-title').value.trim();
+  const day      = document.getElementById('all-qa-date').value  || todayStr();
+  const priority = document.getElementById('all-qa-priority').value || 'normal';
+  if (!title) { document.getElementById('all-qa-title').focus(); return; }
+  try {
+    await api.createTask({ title, day, priority });
+    closeQuickAdd();
+    await loadWeek(false);
+  } catch (e) { showToast('创建失败：' + e.message, true); }
+}
+
+function closeQuickAdd() {
+  document.getElementById('all-quick-add').classList.add('hidden');
+  document.getElementById('all-qa-title').value = '';
+}
+
+// ── View switching ─────────────────────────────────────────────────
+function switchView(v) {
+  if (state.view === v) return;
+  state.view = v;
+
+  if (v === 'all') {
+    pushFilterToURL();
+  } else {
+    writeHashWeek(state.weekStart);
+  }
+
+  document.getElementById('week-header').hidden    = (v !== 'week');
+  document.getElementById('week-grid').hidden      = (v !== 'week');
+  document.getElementById('all-tasks-view').hidden = (v !== 'all');
+
+  document.querySelectorAll('.sidebar-item[data-view]').forEach(el =>
+    el.classList.toggle('active', el.dataset.view === v));
+
+  loadWeek();
 }
 
 // ── Recurring scope dialog ─────────────────────────────────────────
@@ -1052,20 +1442,44 @@ function setupEvents() {
     loadWeek();
   });
 
+  // ── Sidebar navigation
+  document.getElementById('sidebar').addEventListener('click', e => {
+    const item = e.target.closest('.sidebar-item[data-view]');
+    if (item) switchView(item.dataset.view);
+  });
+
+  // ── All-tasks-specific events
+  setupAllTasksEvents();
+
   // ── Hash navigation (browser back/forward)
   window.addEventListener('hashchange', () => {
-    const w = readHashWeek();
-    if (w !== state.weekStart) { state.weekStart = w; loadWeek(); }
+    const newView = readView();
+    if (newView !== state.view) { switchView(newView); return; }
+    if (state.view === 'week') {
+      const w = readHashWeek();
+      if (w !== state.weekStart) { state.weekStart = w; loadWeek(); }
+    }
   });
 }
 
 // ── Init ───────────────────────────────────────────────────────────
 async function init() {
+  state.view = readView();
+  if (state.view === 'all') syncFilterFromURL();
+
+  const isAll = state.view === 'all';
+  document.getElementById('week-header').hidden    = isAll;
+  document.getElementById('week-grid').hidden      = isAll;
+  document.getElementById('all-tasks-view').hidden = !isAll;
+  document.querySelectorAll('.sidebar-item[data-view]').forEach(el =>
+    el.classList.toggle('active', el.dataset.view === state.view));
+
   setupEvents();
-  writeHashWeek(state.weekStart);
+  if (!isAll) writeHashWeek(state.weekStart);
   await loadWeek();
   connectSSE();
   requestNotificationPermission();
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
