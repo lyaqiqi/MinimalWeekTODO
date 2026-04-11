@@ -6,11 +6,12 @@ import json
 import queue
 import threading
 from datetime import date, timedelta
+from functools import wraps
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, g, jsonify, render_template, request, stream_with_context
 
 from ai_service import decompose_task
 from models import (
@@ -44,11 +45,84 @@ def broadcast(event: str, data: dict):
             _sse_clients.remove(q)
 
 
+# ── Auth decorator ────────────────────────────────────────────────────────────
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized'}), 401
+        token = auth_header[7:]
+        try:
+            from supabase_client import get_auth
+            user_resp = get_auth().auth.get_user(token)
+            g.user_id = user_resp.user.id
+        except Exception:
+            return jsonify({'error': 'Invalid or expired token'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ── Frontend ──────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+# ── Auth routes ───────────────────────────────────────────────────────────────
+
+@app.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    body = request.get_json(force=True)
+    email    = (body.get('email') or '').strip()
+    password = (body.get('password') or '').strip()
+    if not email or not password:
+        return jsonify({'error': '请填写邮箱和密码'}), 400
+    try:
+        from supabase_client import get_auth
+        result = get_auth().auth.sign_up({'email': email, 'password': password})
+        if not result.session:
+            return jsonify({'error': '注册成功，请查收确认邮件后登录'}), 200
+        return jsonify({
+            'access_token': result.session.access_token,
+            'user_id': result.user.id,
+            'email': result.user.email,
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    body = request.get_json(force=True)
+    email    = (body.get('email') or '').strip()
+    password = (body.get('password') or '').strip()
+    if not email or not password:
+        return jsonify({'error': '请填写邮箱和密码'}), 400
+    try:
+        from supabase_client import get_auth
+        result = get_auth().auth.sign_in_with_password({'email': email, 'password': password})
+        return jsonify({
+            'access_token': result.session.access_token,
+            'user_id': result.user.id,
+            'email': result.user.email,
+        })
+    except Exception as e:
+        return jsonify({'error': '邮箱或密码错误'}), 401
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+@login_required
+def auth_logout():
+    return jsonify({'ok': True})
+
+
+@app.route('/api/auth/me', methods=['GET'])
+@login_required
+def auth_me():
+    return jsonify({'user_id': g.user_id})
 
 
 # ── SSE stream ────────────────────────────────────────────────────────────────
@@ -84,23 +158,25 @@ def sse_stream():
 # ── GET /api/tasks ────────────────────────────────────────────────────────────
 
 @app.route('/api/tasks', methods=['GET'])
+@login_required
 def get_tasks():
     week_start = request.args.get('week_start')
     if not week_start:
         today = date.today()
         week_start = str(today - timedelta(days=today.weekday()))
 
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
     new_instances = generate_recurring_instances(tasks, week_start)
     if new_instances:
         tasks.extend(new_instances)
-        save_tasks(tasks)
+        save_tasks(tasks, g.user_id)
     return jsonify(get_week_tasks(tasks, week_start))
 
 
 # ── POST /api/tasks ───────────────────────────────────────────────────────────
 
 @app.route('/api/tasks', methods=['POST'])
+@login_required
 def create_task():
     body = request.get_json(force=True)
     title = (body.get('title') or '').strip()
@@ -114,10 +190,10 @@ def create_task():
     deadline       = body.get('deadline')
     notes          = body.get('notes', '')
     recurring      = body.get('recurring')
-    estimated_time = body.get('estimated_time')  # int (minutes) or None
+    estimated_time = body.get('estimated_time')
     ai_group_id    = body.get('ai_group_id')
 
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
 
     if parent_id:
         parent = get_task_by_id(tasks, parent_id)
@@ -137,28 +213,27 @@ def create_task():
         get_task_by_id(tasks, parent_id)['children'].append(task['id'])
 
     tasks.append(task)
-    save_tasks(tasks)
+    save_tasks(tasks, g.user_id)
     return jsonify(task), 201
 
 
 # ── PUT /api/tasks/<id> ───────────────────────────────────────────────────────
 
 @app.route('/api/tasks/<task_id>', methods=['PUT'])
+@login_required
 def update_task(task_id):
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
     task = get_task_by_id(tasks, task_id)
     if task is None:
         return jsonify({'error': 'task not found'}), 404
 
     body = request.get_json(force=True)
 
-    # Parent tasks: `done` can only be set via child propagation, not directly
     if task.get('children') and 'done' in body:
         return jsonify({'error': 'parent done state is driven by its children'}), 400
 
-    scope = body.get('scope', 'single')  # 'single' | 'future' | 'ai_group'
+    scope = body.get('scope', 'single')
 
-    # ── scope=future, non-recurring-rule change: batch-update all future instances ──
     if scope == 'future' and task.get('recurring_origin') and 'recurring' not in body:
         origin_id = task['recurring_origin']
         day_str   = task['day']
@@ -169,10 +244,9 @@ def update_task(task_id):
             for field in batch_fields:
                 if field in body:
                     ft[field] = body[field]
-        save_tasks(tasks)
+        save_tasks(tasks, g.user_id)
         return jsonify({'task': task})
 
-    # ── scope=ai_group: batch-update color/priority across the AI group ──────────
     if scope == 'ai_group' and task.get('ai_group_id'):
         group_id    = task['ai_group_id']
         group_tasks = [t for t in tasks if t.get('ai_group_id') == group_id]
@@ -180,27 +254,22 @@ def update_task(task_id):
             for field in ['color', 'priority']:
                 if field in body:
                     gt[field] = body[field]
-        save_tasks(tasks)
+        save_tasks(tasks, g.user_id)
         return jsonify({'task': task})
 
-    # Recurring change on an instance: handle scope before normal field updates
     if 'recurring' in body and task.get('recurring_origin'):
         template = get_task_by_id(tasks, task['recurring_origin'])
         if scope == 'future' and template:
-            # Update template's recurring rule
             template['recurring'] = body['recurring'] or None
-            # Delete all instances from this day onward to let them regenerate
             origin_id = task['recurring_origin']
             day_str   = task['day']
             tasks = [t for t in tasks if not (
                 t.get('recurring_origin') == origin_id and t['day'] >= day_str
             )]
-            save_tasks(tasks)
+            save_tasks(tasks, g.user_id)
             return jsonify({'task': template})
         else:
-            # Detach this instance from the series
             task['recurring_origin'] = None
-            # The recurring field will be set below in the normal loop
 
     updatable = [
         'title', 'done', 'deadline', 'priority', 'color',
@@ -209,7 +278,6 @@ def update_task(task_id):
     for field in updatable:
         if field not in body:
             continue
-        # When day changes on a parent, cascade to all children
         if field == 'day' and body['day'] != task.get('day'):
             new_day = body['day']
             for child_id in task.get('children', []):
@@ -218,36 +286,34 @@ def update_task(task_id):
                     child['day'] = new_day
         task[field] = body[field]
 
-    # Propagate done state upward when a child is toggled
     if 'done' in body and task.get('parent_id'):
         update_parent_done_state(tasks, task['parent_id'])
 
-    save_tasks(tasks)
+    save_tasks(tasks, g.user_id)
     return jsonify({'task': task})
 
 
 # ── DELETE /api/tasks/<id> ────────────────────────────────────────────────────
 
 @app.route('/api/tasks/<task_id>', methods=['DELETE'])
+@login_required
 def delete_task(task_id):
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
     task = get_task_by_id(tasks, task_id)
     if task is None:
         return jsonify({'error': 'task not found'}), 404
 
-    scope = request.args.get('scope', 'single')  # 'single' | 'future' | 'ai_group'
+    scope = request.args.get('scope', 'single')
 
-    # ── scope=ai_group: delete all tasks in the same AI group ───────────────────
     if scope == 'ai_group' and task.get('ai_group_id'):
         group_id   = task['ai_group_id']
         root_tasks = [t for t in tasks
                       if t.get('ai_group_id') == group_id and not t.get('parent_id')]
         for rt in root_tasks:
             tasks = delete_task_recursive(tasks, rt['id'])
-        save_tasks(tasks)
+        save_tasks(tasks, g.user_id)
         return jsonify({'deleted': task_id})
 
-    # ── Subtask with scope=future: also delete from future parent instances ──────
     if scope == 'future' and task.get('parent_id') and not task.get('recurring_origin'):
         parent_task = get_task_by_id(tasks, task['parent_id'])
         if parent_task and parent_task.get('recurring_origin'):
@@ -261,14 +327,13 @@ def delete_task(task_id):
                 for m in matching:
                     tasks = delete_task_recursive(tasks, m['id'])
         tasks = delete_task_recursive(tasks, task_id)
-        save_tasks(tasks)
+        save_tasks(tasks, g.user_id)
         return jsonify({'deleted': task_id})
 
     if task.get('recurring_origin'):
         template_id = task['recurring_origin']
         template = get_task_by_id(tasks, template_id)
         if scope == 'future':
-            # Set recurring_end on template to day before this instance
             if template:
                 from datetime import date as _date, timedelta as _td
                 try:
@@ -276,33 +341,31 @@ def delete_task(task_id):
                     template['recurring_end'] = str(end)
                 except ValueError:
                     pass
-            # Remove all instances of this series from this day onward
             tasks = [t for t in tasks if not (
                 t.get('recurring_origin') == template_id and t['day'] >= task['day']
             )]
         else:
-            # Single: mark date in deleted_dates so it won't regenerate
             if template:
-                deleted_dates = template.get('deleted_dates', [])
+                deleted_dates = list(template.get('deleted_dates') or [])
                 if task['day'] not in deleted_dates:
                     deleted_dates.append(task['day'])
                 template['deleted_dates'] = deleted_dates
             tasks = [t for t in tasks if t['id'] != task_id]
     else:
         tasks = delete_task_recursive(tasks, task_id)
-        # If deleting a recurring template, remove all its instances too
         if task.get('recurring') and not task.get('recurring_origin'):
             tasks = [t for t in tasks if t.get('recurring_origin') != task_id]
 
-    save_tasks(tasks)
+    save_tasks(tasks, g.user_id)
     return jsonify({'deleted': task_id})
 
 
 # ── POST /api/tasks/<id>/subtasks ─────────────────────────────────────────────
 
 @app.route('/api/tasks/<task_id>/subtasks', methods=['POST'])
+@login_required
 def create_subtask(task_id):
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
     parent = get_task_by_id(tasks, task_id)
     if parent is None:
         return jsonify({'error': 'parent not found'}), 404
@@ -320,7 +383,6 @@ def create_subtask(task_id):
     parent['children'].append(subtask['id'])
     tasks.append(subtask)
 
-    # scope=future: add the same subtask to all future recurring instances of this parent
     if scope == 'future' and parent.get('recurring_origin'):
         origin_id   = parent['recurring_origin']
         day_str     = parent['day']
@@ -331,20 +393,20 @@ def create_subtask(task_id):
             fp['children'].append(fs['id'])
             tasks.append(fs)
 
-    save_tasks(tasks)
+    save_tasks(tasks, g.user_id)
     return jsonify(subtask), 201
 
 
-# ── POST /api/tasks/reorder  (batch order update for drag-and-drop) ────────────
+# ── POST /api/tasks/reorder ───────────────────────────────────────────────────
 
 @app.route('/api/tasks/reorder', methods=['POST'])
+@login_required
 def reorder_tasks():
-    """Body: [{id, order, day}, ...]"""
     body = request.get_json(force=True)
     if not isinstance(body, list):
         return jsonify({'error': 'expected array'}), 400
 
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
     for item in body:
         task = get_task_by_id(tasks, item.get('id', ''))
         if task is None:
@@ -359,15 +421,16 @@ def reorder_tasks():
         if 'order' in item:
             task['order'] = item['order']
 
-    save_tasks(tasks)
+    save_tasks(tasks, g.user_id)
     return jsonify({'ok': True})
 
 
 # ── GET /api/tasks/all ───────────────────────────────────────────────────────
 
 @app.route('/api/tasks/all', methods=['GET'])
+@login_required
 def get_all_tasks():
-    tasks = load_tasks()
+    tasks = load_tasks(g.user_id)
     tasks.sort(key=lambda t: (t.get('day', ''), t.get('order', 0)))
     return jsonify(tasks)
 
@@ -375,6 +438,7 @@ def get_all_tasks():
 # ── POST /api/ai/decompose ───────────────────────────────────────────────────
 
 @app.route('/api/ai/decompose', methods=['POST'])
+@login_required
 def api_decompose_task():
     body = request.get_json(force=True)
     task_title = (body.get('task_title') or '').strip()

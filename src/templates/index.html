@@ -8,6 +8,56 @@
 </head>
 <body>
 
+<!-- ── Auth page ── -->
+<div id="auth-page" hidden>
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="3" width="12" height="11" rx="1.5"/>
+          <path d="M5 3V1.5M11 3V1.5M2 7h12"/>
+        </svg>
+        极简周计划
+      </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="auth-tab-login">登录</button>
+        <button class="auth-tab" id="auth-tab-register">注册</button>
+      </div>
+
+      <!-- Login form -->
+      <form class="auth-form" id="auth-login-form">
+        <div class="form-group">
+          <label>邮箱</label>
+          <input id="login-email" type="email" placeholder="your@email.com" autocomplete="email" required />
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password" required />
+        </div>
+        <p class="auth-error" id="login-error"></p>
+        <button type="submit" class="auth-btn">登录</button>
+      </form>
+
+      <!-- Register form -->
+      <form class="auth-form" id="auth-register-form" hidden>
+        <div class="form-group">
+          <label>邮箱</label>
+          <input id="register-email" type="email" placeholder="your@email.com" autocomplete="email" required />
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input id="register-password" type="password" placeholder="至少 6 位" autocomplete="new-password" required minlength="6" />
+        </div>
+        <p class="auth-error" id="register-error"></p>
+        <button type="submit" class="auth-btn">注册</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── App container (hidden until logged in) ── -->
+<div id="app-container" hidden>
+
 <!-- ── Sidebar ── -->
 <nav id="sidebar">
   <div class="sidebar-top">
@@ -32,6 +82,12 @@
     <button class="sidebar-item" id="btn-ai" title="AI 任务助手">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
         <path d="M8 2L9.2 5.5 13 6.5 9.5 8.2 10.5 12 8 10.2 5.5 12 6.5 8.2 3 6.5 6.8 5.5z" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <button class="sidebar-item" id="btn-logout" title="退出登录">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M6 3H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3"/>
+        <path d="M10 11l3-3-3-3M13 8H6"/>
       </svg>
     </button>
     <button class="sidebar-item" id="btn-settings" title="设置">
@@ -360,6 +416,9 @@
   </div>
 </aside>
 
+</div><!-- #app-container -->
+
+<script src="/static/auth.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

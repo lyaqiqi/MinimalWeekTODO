@@ -5,30 +5,25 @@ APScheduler — checks task deadlines every minute and broadcasts SSE reminders.
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from models import load_tasks, save_tasks
-
-
-def _broadcast_fn_ref():
-    """Indirection wrapper — replaced at startup."""
-    pass
-
-
 _broadcast = None
 
 
 def _check_deadlines():
+    from supabase_client import get_db
     now = datetime.now().strftime('%Y-%m-%dT%H:%M')
-    tasks = load_tasks()
-    changed = False
+    db = get_db()
+
+    # Fetch all unreminded, undone tasks that have a deadline
+    result = db.table('tasks').select('id, title, deadline, user_id') \
+        .eq('reminded', False).eq('done', False).not_.is_('deadline', 'null').execute()
+    tasks = result.data or []
 
     for task in tasks:
-        deadline = task.get('deadline')
-        if not deadline or task.get('reminded') or task.get('done'):
+        deadline = task.get('deadline', '')
+        if not deadline:
             continue
-        # Fire for exact minute OR any overdue deadline not yet reminded
         if deadline[:16] <= now:
-            task['reminded'] = True
-            changed = True
+            db.table('tasks').update({'reminded': True}).eq('id', task['id']).execute()
             if _broadcast:
                 _broadcast('reminder', {
                     'type':      'reminder',
@@ -36,9 +31,6 @@ def _check_deadlines():
                     'title':     task['title'],
                     'timestamp': task['deadline'],
                 })
-
-    if changed:
-        save_tasks(tasks)
 
 
 def start_scheduler(broadcast_fn):
@@ -53,6 +45,8 @@ def start_scheduler(broadcast_fn):
 
 if __name__ == '__main__':
     import time
+    from dotenv import load_dotenv
+    load_dotenv()
 
     def fake_broadcast(event, data):
         print(f'[SSE] event={event} data={data}')

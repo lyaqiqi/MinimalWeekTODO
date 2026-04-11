@@ -154,9 +154,16 @@ function isDoneCollapsed(day) {
 // ── API ────────────────────────────────────────────────────────────
 const api = {
   async call(method, path, body) {
+    const token = (typeof Auth !== 'undefined') ? Auth.getToken() : null;
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(path, opts);
+    if (res.status === 401) {
+      if (typeof Auth !== 'undefined') Auth.clearToken();
+      if (typeof showAuthPage === 'function') showAuthPage();
+      return;
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || res.statusText);
@@ -2076,7 +2083,11 @@ async function init() {
   requestNotificationPermission();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+// init() is called by auth.js after login, or immediately if already authenticated.
+// Fall back to calling it directly only when auth.js is not present.
+if (typeof Auth === 'undefined') {
+  document.addEventListener('DOMContentLoaded', init);
+}
 
 // ── Modal color picker ────────────────────────────────────────────
 
@@ -2248,6 +2259,11 @@ function setupSettingsEvents() {
   });
 
   document.getElementById('color-add-btn').addEventListener('click', addCustomColor);
+
+  document.getElementById('btn-logout').addEventListener('click', async () => {
+    if (typeof Auth !== 'undefined') await Auth.logout();
+    location.reload();
+  });
 }
 
 // ── AI Panel ────────────────────────────────────────────────────────
