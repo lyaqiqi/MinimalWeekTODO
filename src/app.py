@@ -68,7 +68,11 @@ def login_required(f):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    import os
+    return render_template('index.html',
+        supabase_url=os.environ.get('SUPABASE_URL', ''),
+        supabase_anon_key=os.environ.get('SUPABASE_ANON_KEY', ''),
+    )
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────

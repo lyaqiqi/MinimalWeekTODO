@@ -1,11 +1,11 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════
-   极简周计划 — Frontend Logic
+   WeekPlan — Frontend Logic
    ═══════════════════════════════════════════════════════════════ */
 
 // ── Constants ──────────────────────────────────────────────────────
 const WEEKDAYS_EN  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const WEEKDAYS_CN  = ['周一','周二','周三','周四','周五','周六','周日'];
+const MONTHS_EN    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 // ── Color system (merges built-ins with localStorage user colors) ──
 const BUILTIN_COLORS = [
   { key: 'blue',   hex: '#4A90D9', name: 'Study'    },
@@ -131,7 +131,7 @@ function todayStr()    { return toDateStr(new Date()); }
 function dayIndex(s)   { return (new Date(s + 'T00:00:00').getDay() + 6) % 7; }
 function formatDateLabel(s) {
   const d = new Date(s + 'T00:00:00');
-  return `${d.getMonth() + 1}月${d.getDate()}日  ${WEEKDAYS_CN[dayIndex(s)]}`;
+  return `${MONTHS_EN[d.getMonth()]} ${d.getDate()}  ${WEEKDAYS_EN[dayIndex(s)]}`;
 }
 function getTask(id)       { return state.tasks.find(t => t.id === id); }
 function getChildren(pid)  { return state.tasks.filter(t => t.parent_id === pid).sort((a, b) => a.order - b.order); }
@@ -193,7 +193,7 @@ async function loadWeek(keepModal = false) {
       const t = getTask(state.modalTaskId);
       if (t) renderModalContent(t);
     }
-  } catch (e) { showToast('加载失败：' + e.message, true); }
+  } catch (e) { showToast('Load failed: ' + e.message, true); }
 }
 
 function renderCurrentView() {
@@ -206,7 +206,7 @@ function updateWeekLabel() {
   const end = addDays(state.weekStart, 6);
   const s   = new Date(state.weekStart + 'T00:00:00');
   const e   = new Date(end + 'T00:00:00');
-  const fmt = d => `${d.getMonth() + 1}月${d.getDate()}日`;
+  const fmt = d => `${MONTHS_EN[d.getMonth()]} ${d.getDate()}`;
   document.getElementById('week-label').textContent =
     `${s.getFullYear()}  /  ${fmt(s)} — ${fmt(e)}`;
 }
@@ -273,7 +273,7 @@ function buildDoneSection(day, doneTasks) {
   const toggle = document.createElement('div');
   toggle.className = 'done-toggle' + (collapsed ? '' : ' is-open');
   toggle.dataset.day = day;
-  toggle.innerHTML = `<span>已完成 ${doneTasks.length} 项</span>
+  toggle.innerHTML = `<span>${doneTasks.length} completed</span>
                       <span class="done-toggle-arrow">▲</span>`;
   section.appendChild(toggle);
 
@@ -334,11 +334,11 @@ function buildTaskItem(task) {
   // Action buttons
   const actions = document.createElement('div');
   actions.className = 'task-actions';
-  actions.appendChild(makeActionBtn('reminder', svgBell(), '设置提醒'));
+  actions.appendChild(makeActionBtn('reminder', svgBell(), 'Set reminder'));
   if (!task.parent_id) {
-    actions.appendChild(makeActionBtn('add-sub', svgPlus(), '添加子任务'));
+    actions.appendChild(makeActionBtn('add-sub', svgPlus(), 'Add subtask'));
   }
-  actions.appendChild(makeActionBtn('delete', svgTrash(), '删除', 'btn-action--delete'));
+  actions.appendChild(makeActionBtn('delete', svgTrash(), 'Delete', 'btn-action--delete'));
   row.appendChild(actions);
 
   // Checkbox
@@ -396,7 +396,7 @@ function buildSubtaskItem(task) {
 
   const actions = document.createElement('div');
   actions.className = 'task-actions';
-  actions.appendChild(makeActionBtn('delete', svgTrash(), '删除', 'btn-action--delete'));
+  actions.appendChild(makeActionBtn('delete', svgTrash(), 'Delete', 'btn-action--delete'));
   row.appendChild(actions);
 
   const check = document.createElement('input');
@@ -427,7 +427,7 @@ function buildInlineInput(day) {
   row.className = 'inline-input-row';
   const input = document.createElement('input');
   input.className = 'inline-input';
-  input.placeholder = '新任务名称…';
+  input.placeholder = 'New task name…';
   input.type = 'text'; input.autocomplete = 'off';
   row.appendChild(input);
   requestAnimationFrame(() => input.focus());
@@ -465,7 +465,7 @@ async function submitNewTask(day, title) {
   try {
     await api.createTask({ title, day });
     await loadWeek(true);
-  } catch (e) { showToast('创建失败：' + e.message, true); await loadWeek(true); }
+  } catch (e) { showToast('Failed to create: ' + e.message, true); await loadWeek(true); }
 }
 
 // ── Toggle done ────────────────────────────────────────────────────
@@ -491,7 +491,7 @@ async function toggleDone(taskId, done) {
       if (idx !== -1) state.tasks[idx] = res.task;
     }
     await loadWeek(state.modalTaskId != null);
-  } catch (e) { showToast('更新失败', true); await loadWeek(true); }
+  } catch (e) { showToast('Update failed', true); await loadWeek(true); }
 }
 
 // ── Priority ───────────────────────────────────────────────────────
@@ -501,10 +501,10 @@ async function setPriority(taskId, priority) {
 
   let scope = 'single';
   if (task.recurring_origin) {
-    scope = await showRecurScopeDialog('如何修改优先级？');
+    scope = await showRecurScopeDialog('How to update priority?');
     if (scope === null) return;
   } else if (task.ai_group_id) {
-    scope = await showScopeDialog('如何修改优先级？', '仅此任务', 'single', '同组所有任务', 'ai_group');
+    scope = await showScopeDialog('How to update priority?', 'This task only', 'single', 'All tasks in group', 'ai_group');
     if (scope === null) return;
   }
 
@@ -525,7 +525,7 @@ async function setPriority(taskId, priority) {
   }
   try {
     await api.updateTask(taskId, { priority, scope });
-  } catch (e) { showToast('设置失败', true); await loadWeek(true); }
+  } catch (e) { showToast('Failed to update', true); await loadWeek(true); }
 }
 
 // ── Delete with undo ───────────────────────────────────────────────
@@ -536,15 +536,15 @@ async function deleteTask(taskId) {
   // Ask scope
   let scope = 'single';
   if (task.recurring_origin) {
-    scope = await showRecurScopeDialog('如何删除这个循环任务？');
+    scope = await showRecurScopeDialog('How to delete this recurring task?');
     if (scope === null) return;
   } else if (!task.parent_id && task.ai_group_id) {
-    scope = await showScopeDialog('如何删除这个任务？', '仅此任务', 'single', '删除同组所有任务', 'ai_group');
+    scope = await showScopeDialog('How to delete this task?', 'This task only', 'single', 'Delete all in group', 'ai_group');
     if (scope === null) return;
   } else if (task.parent_id) {
     const parent = getTask(task.parent_id);
     if (parent?.recurring_origin) {
-      scope = await showScopeDialog('如何删除这个子任务？', '仅此任务', 'single', '此任务及之后所有同类实例', 'future');
+      scope = await showScopeDialog('How to delete this subtask?', 'This task only', 'single', 'This and all following', 'future');
       if (scope === null) return;
     }
   }
@@ -564,7 +564,7 @@ async function deleteTask(taskId) {
     if (state.modalTaskId === taskId) closeModal();
     renderCurrentView();
     try { await api.call('DELETE', `/api/tasks/${taskId}?scope=future`); }
-    catch { showToast('删除失败', true); await loadWeek(true); }
+    catch { showToast('Delete failed', true); await loadWeek(true); }
     return;
   }
 
@@ -575,7 +575,7 @@ async function deleteTask(taskId) {
     if (state.modalTaskId === taskId) closeModal();
     renderCurrentView();
     try { await api.call('DELETE', `/api/tasks/${taskId}?scope=ai_group`); }
-    catch { showToast('删除失败', true); await loadWeek(true); }
+    catch { showToast('Delete failed', true); await loadWeek(true); }
     return;
   }
 
@@ -608,7 +608,7 @@ async function deleteTask(taskId) {
   if (state.modalTaskId && toRemove.has(state.modalTaskId)) closeModal();
   renderCurrentView();
 
-  const toast = showUndoToast(`已删除"${task.title.slice(0, 18)}"`, () => {
+  const toast = showUndoToast(`Deleted "${task.title.slice(0, 18)}"`, () => {
     clearTimeout(entry.timer);
     state.pendingDeletes.delete(taskId);
     state.tasks = snapshot;
@@ -621,7 +621,7 @@ async function deleteTask(taskId) {
       state.pendingDeletes.delete(taskId);
       const scopeParam = scope !== 'single' ? `?scope=${scope}` : '';
       try { await api.call('DELETE', `/api/tasks/${taskId}${scopeParam}`); }
-      catch { state.tasks = snapshot; renderCurrentView(); showToast('删除失败', true); }
+      catch { state.tasks = snapshot; renderCurrentView(); showToast('Delete failed', true); }
     }, DELETE_GRACE),
   };
   state.pendingDeletes.set(taskId, entry);
@@ -681,7 +681,7 @@ async function handleDrop(taskId, targetDay, overTaskId, insertBefore) {
   try {
     await api.reorder(reorderPayload);
   } catch (e) {
-    showToast('排序失败', true);
+    showToast('Reorder failed', true);
     await loadWeek(true);
   }
 }
@@ -714,7 +714,7 @@ async function closeModal() {
   const hasPending = Object.keys(_pendingSaveData).length > 0;
 
   if (task && task.recurring_origin && hasPending) {
-    const scope = await showRecurScopeDialog('如何保存这些修改？');
+    const scope = await showRecurScopeDialog('How to save these changes?');
     if (scope !== null) {
       await flushSave(scope);
     } else {
@@ -772,7 +772,7 @@ function renderModalSubtasks(parentId) {
     t.className = 'modal-subtask-title'; t.textContent = child.title;
 
     const del = document.createElement('button');
-    del.className = 'modal-subtask-del'; del.textContent = '✕'; del.title = '删除';
+    del.className = 'modal-subtask-del'; del.textContent = '✕'; del.title = 'Delete';
 
     item.appendChild(check); item.appendChild(t); item.appendChild(del);
     list.appendChild(item);
@@ -813,7 +813,7 @@ async function flushSave(scope = 'single') {
   try {
     const res = await api.updateTask(id, { ...payload, scope });
     if (task && res?.task) Object.assign(task, res.task);
-  } catch (e) { showToast('保存失败', true); }
+  } catch (e) { showToast('Save failed', true); }
 }
 
 // ── Modal sub-pickers ──────────────────────────────────────────────
@@ -835,10 +835,10 @@ async function setColor(color) {
 
   let scope = 'single';
   if (task.recurring_origin) {
-    scope = await showRecurScopeDialog('如何修改颜色？');
+    scope = await showRecurScopeDialog('How to update color?');
     if (scope === null) return;
   } else if (task.ai_group_id) {
-    scope = await showScopeDialog('如何修改颜色？', '仅此任务', 'single', '同组所有任务', 'ai_group');
+    scope = await showScopeDialog('How to update color?', 'This task only', 'single', 'All tasks in group', 'ai_group');
     if (scope === null) return;
   }
 
@@ -855,7 +855,7 @@ async function setColor(color) {
   }
   renderModalContent(getTask(id)); renderModalColorPicker(); renderCurrentView();
   try { await api.updateTask(id, { color: newColor, scope }); }
-  catch (e) { showToast('颜色设置失败', true); await loadWeek(true); }
+  catch (e) { showToast('Color update failed', true); await loadWeek(true); }
 }
 
 async function setRecurring(value) {
@@ -864,7 +864,7 @@ async function setRecurring(value) {
 
   let scope = 'single';
   if (task.recurring_origin) {
-    scope = await showRecurScopeDialog('如何修改这个循环任务？');
+    scope = await showRecurScopeDialog('How to update this recurring task?');
     if (scope === null) return; // cancelled
   }
 
@@ -875,7 +875,7 @@ async function setRecurring(value) {
     await api.updateTask(id, { recurring: value || null, scope });
     await loadWeek(true);
   }
-  catch (e) { showToast('循环设置失败', true); }
+  catch (e) { showToast('Recurrence update failed', true); }
 }
 
 async function setReminder(deadline) {
@@ -884,7 +884,7 @@ async function setReminder(deadline) {
 
   let scope = 'single';
   if (task.recurring_origin) {
-    scope = await showRecurScopeDialog('如何修改提醒时间？');
+    scope = await showRecurScopeDialog('How to update reminder?');
     if (scope === null) return;
   }
 
@@ -897,7 +897,7 @@ async function setReminder(deadline) {
     task.reminded = false;
   }
   try { await api.updateTask(id, { deadline: newDeadline, reminded: false, scope }); }
-  catch (e) { showToast('提醒设置失败', true); }
+  catch (e) { showToast('Reminder update failed', true); }
 }
 
 // ── All-tasks view ─────────────────────────────────────────────────
@@ -1019,10 +1019,10 @@ function buildAllTaskCard(task) {
   const d = new Date(task.day + 'T00:00:00');
   const today = todayStr();
   const diff = Math.round((new Date(task.day + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
-  let dateLabel = `${d.getMonth()+1}月${d.getDate()}日 ${WEEKDAYS_CN[dayIndex(task.day)]}`;
-  if (diff === 0) dateLabel = '今天';
-  else if (diff === 1) dateLabel = '明天';
-  else if (diff === -1) dateLabel = '昨天';
+  let dateLabel = `${MONTHS_EN[d.getMonth()]} ${d.getDate()} ${WEEKDAYS_EN[dayIndex(task.day)]}`;
+  if (diff === 0) dateLabel = 'Today';
+  else if (diff === 1) dateLabel = 'Tomorrow';
+  else if (diff === -1) dateLabel = 'Yesterday';
   const dateEl = document.createElement('span');
   dateEl.className = 'all-task-date';
   dateEl.textContent = dateLabel;
@@ -1043,11 +1043,11 @@ function buildAllTaskCard(task) {
   if (task.priority && task.priority !== 'normal') {
     const pill = document.createElement('span');
     pill.className = `all-priority-pill all-priority-pill--${task.priority}`;
-    pill.textContent = task.priority === 'urgent' ? '紧急' : '重要';
+    pill.textContent = task.priority === 'urgent' ? 'Urgent' : 'Important';
     titleRight.appendChild(pill);
   }
   if (task.recurring) {
-    const MAP = { daily: '每天', weekly: '每周', monthly: '每月' };
+    const MAP = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
     const pill = document.createElement('span');
     pill.className = 'all-recur-pill';
     pill.textContent = MAP[task.recurring] || task.recurring;
@@ -1070,8 +1070,8 @@ function buildAllTaskCard(task) {
   // Hover actions
   const acts = document.createElement('div');
   acts.className = 'all-task-actions';
-  acts.appendChild(makeActionBtn('reminder', svgBell(), '设置提醒'));
-  acts.appendChild(makeActionBtn('delete', svgTrash(), '删除', 'btn-action--delete'));
+  acts.appendChild(makeActionBtn('reminder', svgBell(), 'Set reminder'));
+  acts.appendChild(makeActionBtn('delete', svgTrash(), 'Delete', 'btn-action--delete'));
   main.appendChild(acts);
 
   card.appendChild(main);
@@ -1115,8 +1115,8 @@ function renderAllTasks() {
 
   if (filtered.length === 0) {
     const msg = total === 0
-      ? '暂无任务，点击「新增任务」创建第一个任务'
-      : '没有符合筛选条件的任务';
+      ? 'No tasks — click New Task to get started'
+      : 'No tasks match the current filters';
     container.innerHTML = `<div class="all-tasks-empty">${msg}</div>`;
     return;
   }
@@ -1145,7 +1145,7 @@ function getDashColorHex(key) {
   return getColorHex(key);
 }
 function getDashColorLabel(key) {
-  if (key === 'none') return '无标签';
+  if (key === 'none') return 'No Label';
   return getColorName(key);
 }
 
@@ -1157,7 +1157,7 @@ function initDashboard() {
 
   right.innerHTML = `
     <div class="dash-card" id="dash-wave-card">
-      <div class="dash-card-title">完成进度</div>
+      <div class="dash-card-title">Progress</div>
       <div class="dash-wave-wrap">
         <div class="dash-wave-circle" id="dash-wave-circle">
           <svg class="dash-wave-svg" id="dash-wave-svg"
@@ -1171,14 +1171,14 @@ function initDashboard() {
     </div>
 
     <div class="dash-card" id="dash-bar-card">
-      <div class="dash-card-title">本周日程
+      <div class="dash-card-title">This Week
         <span class="dash-bar-week" id="dash-bar-week"></span>
       </div>
       <canvas id="dash-bar-canvas"></canvas>
     </div>
 
     <div class="dash-card" id="dash-tree-card">
-      <div class="dash-card-title">模块分布</div>
+      <div class="dash-card-title">By Category</div>
       <svg id="dash-tree-svg" class="dash-tree-svg"
            xmlns="http://www.w3.org/2000/svg"></svg>
     </div>
@@ -1226,7 +1226,7 @@ function renderDashBar() {
   if (weekLabel) {
     const fmt = d => {
       const dt = new Date(d + 'T00:00:00');
-      return `${dt.getMonth() + 1}月${dt.getDate()}日`;
+      return `${MONTHS_EN[dt.getMonth()]} ${dt.getDate()}`;
     };
     weekLabel.textContent = `${fmt(days[0])} – ${fmt(days[6])}`;
   }
@@ -1251,7 +1251,7 @@ function renderDashBar() {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+  const DAY_LABELS = ['M','T','W','T','F','S','S'];
   const LABEL_H = 20;
   const chartH  = cssH - LABEL_H;
   const maxVal  = Math.max(...counts.map(c => c.total), 1);
@@ -1299,7 +1299,7 @@ function renderDashBar() {
       if (col < 0 || col > 6) { hideDashTooltip(); return; }
       const c = counts[col];
       showDashTooltip(e.clientX, e.clientY,
-        `${['周一','周二','周三','周四','周五','周六','周日'][col]}：${c.done} 已完成 / ${c.total} 个任务`);
+        `${WEEKDAYS_EN[col]}: ${c.done} done / ${c.total} total`);
     });
     canvas.addEventListener('mouseleave', hideDashTooltip);
     canvas.addEventListener('click', e => {
@@ -1346,7 +1346,6 @@ function squarify(items, rect) {
     }
 
     // Try to split into two groups that minimize aspect ratio
-    const area = w * h;
     let bestIdx = 1;
     let bestAR  = Infinity;
 
@@ -1354,7 +1353,6 @@ function squarify(items, rect) {
       const aVal = its.slice(0, split).reduce((s, it) => s + it.value, 0);
       const bVal = its.slice(split).reduce((s, it) => s + it.value, 0);
       const aFrac = aVal / total;
-      const bFrac = bVal / total;
 
       let aW, aH, bW, bH;
       if (w >= h) {
@@ -1480,7 +1478,7 @@ function renderDashTreemap(tasks) {
     rect.addEventListener('mouseenter', e => {
       const pct = Math.round((tile.value / total) * 100);
       showDashTooltip(e.clientX, e.clientY,
-        `${getDashColorLabel(tile.key)}：${tile.value} 个任务（${pct}%）`);
+        `${getDashColorLabel(tile.key)}: ${tile.value} tasks (${pct}%)`);
       rect.setAttribute('fill-opacity', '0.75');
     });
     rect.addEventListener('mousemove', e => moveDashTooltip(e.clientX, e.clientY));
@@ -1625,7 +1623,7 @@ async function submitQuickAdd() {
     await api.createTask({ title, day, priority });
     closeQuickAdd();
     await loadWeek(false);
-  } catch (e) { showToast('创建失败：' + e.message, true); }
+  } catch (e) { showToast('Failed to create: ' + e.message, true); }
 }
 
 function closeQuickAdd() {
@@ -1678,7 +1676,7 @@ function showScopeDialog(msg, label1, val1, label2, val2) {
 }
 
 function showRecurScopeDialog(msg) {
-  return showScopeDialog(msg, '仅此任务', 'single', '此任务及之后所有任务', 'future');
+  return showScopeDialog(msg, 'This event only', 'single', 'This and all following', 'future');
 }
 
 // ── Context menu ───────────────────────────────────────────────────
@@ -1720,8 +1718,8 @@ function showReminderCard(data) {
   card.innerHTML = `
     <div class="reminder-card-header">
       <span class="reminder-icon">⏰</span>
-      <span class="reminder-label">任务提醒</span>
-      <button class="reminder-close" title="关闭">✕</button>
+      <span class="reminder-label">Task Reminder</span>
+      <button class="reminder-close" title="Close">✕</button>
     </div>
     <div class="reminder-card-body">
       <div class="reminder-task-name">${escHtml(data.title)}</div>
@@ -1750,7 +1748,7 @@ async function requestNotificationPermission() {
 function triggerBrowserNotification(data) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const time = data.timestamp ? data.timestamp.slice(11, 16) : '';
-  new Notification('⏰ 任务提醒', {
+  new Notification('⏰ Task Reminder', {
     body: `${data.title}${time ? '  ' + time : ''}`,
     icon: '/static/favicon.ico',
   });
@@ -1783,7 +1781,7 @@ function showUndoToast(msg, onUndo) {
   const text = document.createElement('span');
   text.textContent = msg;
   const btn  = document.createElement('button');
-  btn.className = 'toast-undo'; btn.textContent = '撤销';
+  btn.className = 'toast-undo'; btn.textContent = 'Undo';
   toast.appendChild(text); toast.appendChild(btn);
   c.appendChild(toast);
   btn.addEventListener('click', () => { toast.remove(); onUndo(); });
@@ -1993,16 +1991,16 @@ function setupEvents() {
       let scope = 'single';
       if (parentTask?.recurring_origin) {
         scope = await showScopeDialog(
-          '为循环任务添加子任务',
-          '仅此任务', 'single',
-          '此任务及之后所有任务', 'future'
+          'Add subtask to recurring task',
+          'This event only', 'single',
+          'This and all following', 'future'
         );
         if (!scope) return;
       }
       try {
         await api.createSubtask(state.modalTaskId, val, scope);
         await loadWeek(true);
-      } catch (err) { showToast('添加失败', true); }
+      } catch (err) { showToast('Failed to add', true); }
     }
   });
 
@@ -2160,7 +2158,7 @@ function renderColorManager() {
     const swatchWrap = document.createElement('label');
     swatchWrap.className = 'color-mgr-swatch';
     swatchWrap.style.background = color.hex;
-    swatchWrap.title = '点击更改颜色';
+    swatchWrap.title = 'Click to change color';
     const colorInput = document.createElement('input');
     colorInput.type  = 'color';
     colorInput.value = color.hex;
@@ -2182,7 +2180,7 @@ function renderColorManager() {
     nameInput.type      = 'text';
     nameInput.className = 'color-mgr-name';
     nameInput.value     = color.name;
-    nameInput.placeholder = '标签名称';
+    nameInput.placeholder = 'Label name';
     nameInput.addEventListener('change', e => {
       const colors2 = getUserColors();
       colors2[idx].name = e.target.value.trim() || color.key;
@@ -2201,7 +2199,7 @@ function renderColorManager() {
     // Delete button (disabled for built-ins)
     const delBtn = document.createElement('button');
     delBtn.className = 'color-mgr-del';
-    delBtn.title     = '删除';
+    delBtn.title     = 'Delete';
     delBtn.innerHTML = '✕';
     const isBuiltin = BUILTIN_COLORS.some(b => b.key === color.key);
     if (isBuiltin) {
@@ -2230,7 +2228,7 @@ function addCustomColor() {
   const key  = `custom${n}`;
   const hue  = Math.round(Math.random() * 360);
   const hex  = hslToHex(hue, 60, 58);
-  colors.push({ key, hex, name: `标签${n}` });
+  colors.push({ key, hex, name: `Label ${n}` });
   saveUserColors(colors);
   injectColorStyles();
   renderColorManager();
@@ -2261,6 +2259,7 @@ function setupSettingsEvents() {
   document.getElementById('color-add-btn').addEventListener('click', addCustomColor);
 
   document.getElementById('btn-logout').addEventListener('click', async () => {
+    closeSettingsPanel();
     if (typeof Auth !== 'undefined') await Auth.logout();
     location.reload();
   });
@@ -2268,7 +2267,7 @@ function setupSettingsEvents() {
 
 // ── AI Panel ────────────────────────────────────────────────────────
 
-const PRIORITY_LABELS = { urgent: '紧急', important: '重要', normal: '普通' };
+const PRIORITY_LABELS = { urgent: 'Urgent', important: 'Important', normal: 'Normal' };
 const PRIORITY_COLORS = { urgent: '#E8524A', important: '#F5A623', normal: '#BBBBB6' };
 
 const aiState = {
@@ -2324,7 +2323,7 @@ async function runDecompose() {
     renderAIResult(input);
     showAISection('ai-result');
   } catch (e) {
-    document.getElementById('ai-error-msg').textContent = '请求失败：' + e.message;
+    document.getElementById('ai-error-msg').textContent = 'Request failed: ' + e.message;
     showAISection('ai-error');
   }
 }
@@ -2383,7 +2382,7 @@ function buildAISubtaskCard(subtask, idx) {
     const d = new Date(subtask.suggested_date + 'T00:00:00');
     const ds = document.createElement('span');
     ds.className = 'ai-meta-item';
-    ds.textContent = `📅 ${d.getMonth() + 1}月${d.getDate()}日`;
+    ds.textContent = `📅 ${MONTHS_EN[d.getMonth()]} ${d.getDate()}`;
     meta.appendChild(ds);
   }
   content.appendChild(meta);
@@ -2392,7 +2391,7 @@ function buildAISubtaskCard(subtask, idx) {
   // Edit button
   const editBtn = document.createElement('button');
   editBtn.className = 'ai-edit-btn';
-  editBtn.textContent = '编辑';
+  editBtn.textContent = 'Edit';
   editBtn.addEventListener('click', () => showAIEditForm(card, idx));
   main.appendChild(editBtn);
 
@@ -2408,29 +2407,29 @@ function showAIEditForm(card, idx) {
   form.className = 'ai-edit-form';
   form.innerHTML = `
     <div class="ai-edit-field">
-      <label>标题</label>
+      <label>Title</label>
       <input class="ai-edit-input ai-edit-title" type="text" value="${escHtml(s.title)}" />
     </div>
     <div class="ai-edit-field">
-      <label>预估时间</label>
+      <label>Est. Time</label>
       <input class="ai-edit-input ai-edit-time" type="text"
-             value="${escHtml(s.estimated_time || '')}" placeholder="如：2小时" />
+             value="${escHtml(s.estimated_time || '')}" placeholder="e.g. 2h" />
     </div>
     <div class="ai-edit-field ai-edit-priority-row">
-      <label>优先级</label>
+      <label>Priority</label>
       <div class="ai-priority-btns">
-        <button class="ai-priority-opt${s.priority === 'urgent'    ? ' active' : ''}" data-p="urgent">紧急</button>
-        <button class="ai-priority-opt${s.priority === 'important' ? ' active' : ''}" data-p="important">重要</button>
-        <button class="ai-priority-opt${(!s.priority || s.priority === 'normal') ? ' active' : ''}" data-p="normal">普通</button>
+        <button class="ai-priority-opt${s.priority === 'urgent'    ? ' active' : ''}" data-p="urgent">Urgent</button>
+        <button class="ai-priority-opt${s.priority === 'important' ? ' active' : ''}" data-p="important">Important</button>
+        <button class="ai-priority-opt${(!s.priority || s.priority === 'normal') ? ' active' : ''}" data-p="normal">Normal</button>
       </div>
     </div>
     <div class="ai-edit-field">
-      <label>日期</label>
+      <label>Date</label>
       <input class="ai-edit-input ai-edit-date" type="date" value="${s.suggested_date || ''}" />
     </div>
     <div class="ai-edit-actions">
-      <button class="ai-save-btn">保存</button>
-      <button class="ai-cancel-btn">取消</button>
+      <button class="ai-save-btn">Save</button>
+      <button class="ai-cancel-btn">Cancel</button>
     </div>`;
 
   form.querySelectorAll('.ai-priority-opt').forEach(btn => {
@@ -2461,9 +2460,9 @@ function showAIEditForm(card, idx) {
 
 function parseEstimatedMins(str) {
   if (!str) return null;
-  const h = str.match(/(\d+(?:\.\d+)?)\s*小时/);
-  const m = str.match(/(\d+)\s*分钟/);
-  const d = str.match(/(\d+)\s*天/);
+  const h = str.match(/(\d+(?:\.\d+)?)\s*h(?:ours?)?/i);
+  const m = str.match(/(\d+)\s*m(?:in(?:utes?)?)?/i);
+  const d = str.match(/(\d+)\s*d(?:ays?)?/i);
   if (h) return Math.round(parseFloat(h[1]) * 60);
   if (m) return parseInt(m[1]);
   if (d) return parseInt(d[1]) * 480;
@@ -2472,11 +2471,11 @@ function parseEstimatedMins(str) {
 
 async function addAllToSchedule() {
   const selected = aiState.subtasks.filter(s => s.selected);
-  if (!selected.length) { showToast('请至少选择一个任务', true); return; }
+  if (!selected.length) { showToast('Select at least one task', true); return; }
 
   const btn = document.getElementById('ai-add-all-btn');
   btn.disabled    = true;
-  btn.textContent = '添加中…';
+  btn.textContent = 'Adding…';
 
   // Group subtasks by suggested_date
   const byDate = new Map();
@@ -2515,7 +2514,7 @@ async function addAllToSchedule() {
         subCount++;
       }
     }
-    showToast(`已添加 ${byDate.size} 个父任务、${subCount} 个子任务到日程`);
+    showToast(`Added ${byDate.size} tasks and ${subCount} subtasks to schedule`);
     closeAIPanel();
     if (state.view === 'week') {
       await loadWeek();
@@ -2523,10 +2522,10 @@ async function addAllToSchedule() {
       switchView('week');
     }
   } catch (e) {
-    showToast('添加失败：' + e.message, true);
+    showToast('Failed to add: ' + e.message, true);
   } finally {
     btn.disabled    = false;
-    btn.textContent = '全部添加到日程';
+    btn.textContent = 'Add All to Schedule';
   }
 }
 

@@ -5,6 +5,12 @@ Supabase client factory — cached singletons for DB and auth operations.
 import os
 from supabase import create_client, Client
 
+# httpx picks up system proxy settings (HTTP_PROXY / HTTPS_PROXY) which can
+# break TLS tunneling to Supabase.  Remove them before the clients are built.
+for _var in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy',
+             'ALL_PROXY', 'all_proxy'):
+    os.environ.pop(_var, None)
+
 _db_client: Client | None = None
 _anon_client: Client | None = None
 

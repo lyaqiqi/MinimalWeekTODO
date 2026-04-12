@@ -1,58 +1,169 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>极简周计划</title>
+  <title>WeekPlan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css" />
+  <!-- Supabase JS SDK for OAuth -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    window.SUPABASE_URL      = "{{ supabase_url }}";
+    window.SUPABASE_ANON_KEY = "{{ supabase_anon_key }}";
+  </script>
 </head>
 <body>
 
 <!-- ── Auth page ── -->
 <div id="auth-page" hidden>
-  <div class="auth-container">
-    <div class="auth-card">
-      <div class="auth-logo">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="2" y="3" width="12" height="11" rx="1.5"/>
-          <path d="M5 3V1.5M11 3V1.5M2 7h12"/>
-        </svg>
-        极简周计划
+
+  <!-- Left: marketing panel -->
+  <div class="auth-left">
+    <div class="auth-brand">
+      <!-- WeekTODO logo: "W" lettermark in a blue rounded square -->
+      <svg class="auth-brand-logo" viewBox="0 0 36 36" fill="none">
+        <rect width="36" height="36" rx="8" fill="#0075de"/>
+        <path d="M8 11 L13 25 L18 17 L23 25 L28 11"
+              stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>WeekTODO</span>
+    </div>
+
+    <div class="auth-marketing">
+      <h1 class="auth-headline">Welcome to<br>WeekTODO.</h1>
+      <p class="auth-tagline">Get started with our paper-like week todo web.</p>
+      <ul class="auth-features">
+        <li>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M3 8l4 4 6-6"/>
+          </svg>
+          AI-powered task break-down for better planning
+        </li>
+        <li>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M3 8l4 4 6-6"/>
+          </svg>
+          As minimal as using a paper
+        </li>
+        <li>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M3 8l4 4 6-6"/>
+          </svg>
+          Statistics Analysis for all tasks
+        </li>
+      </ul>
+    </div>
+
+    <!-- Decorative week-grid illustration -->
+    <div class="auth-illustration">
+      <svg viewBox="0 0 280 140" fill="none" class="auth-week-svg">
+        <!-- Column headers: Mon–Sun -->
+        <text x="20"  y="18" class="wk-label">M</text>
+        <text x="60"  y="18" class="wk-label">T</text>
+        <text x="100" y="18" class="wk-label">W</text>
+        <text x="140" y="18" class="wk-label">T</text>
+        <text x="180" y="18" class="wk-label">F</text>
+        <text x="220" y="18" class="wk-label">S</text>
+        <text x="260" y="18" class="wk-label">S</text>
+        <!-- Divider line -->
+        <line x1="0" y1="26" x2="280" y2="26" stroke="rgba(0,0,0,0.1)" stroke-width="1"/>
+        <!-- Task bars: varied widths/colors to suggest filled tasks -->
+        <rect x="8"   y="36" width="28" height="10" rx="3" fill="#0075de" opacity="0.7"/>
+        <rect x="8"   y="52" width="20" height="10" rx="3" fill="#0075de" opacity="0.3"/>
+        <rect x="48"  y="36" width="24" height="10" rx="3" fill="#52B788" opacity="0.7"/>
+        <rect x="88"  y="36" width="30" height="10" rx="3" fill="#0075de" opacity="0.5"/>
+        <rect x="88"  y="52" width="18" height="10" rx="3" fill="#9B59B6" opacity="0.5"/>
+        <rect x="128" y="36" width="26" height="10" rx="3" fill="#F5A623" opacity="0.7"/>
+        <rect x="168" y="36" width="22" height="10" rx="3" fill="#52B788" opacity="0.5"/>
+        <rect x="168" y="52" width="30" height="10" rx="3" fill="#0075de" opacity="0.3"/>
+        <rect x="208" y="36" width="16" height="10" rx="3" fill="#a39e98" opacity="0.4"/>
+        <!-- Notebook lines -->
+        <line x1="0" y1="70"  x2="280" y2="70"  stroke="rgba(0,0,0,0.07)" stroke-width="1"/>
+        <line x1="0" y1="86"  x2="280" y2="86"  stroke="rgba(0,0,0,0.07)" stroke-width="1"/>
+        <line x1="0" y1="102" x2="280" y2="102" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>
+        <line x1="0" y1="118" x2="280" y2="118" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>
+        <line x1="0" y1="134" x2="280" y2="134" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Right: auth form panel -->
+  <div class="auth-right">
+    <div class="auth-form-wrap">
+
+      <h2 class="auth-form-title">Get started</h2>
+      <p class="auth-form-sub">Sign in or create your account</p>
+
+      <!-- OAuth buttons -->
+      <div class="oauth-btns">
+        <button class="oauth-btn oauth-google" id="btn-oauth-google">
+          <!-- Google G -->
+          <svg viewBox="0 0 24 24" width="18" height="18">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <button class="oauth-btn oauth-github" id="btn-oauth-github">
+          <!-- GitHub mark -->
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          Continue with GitHub
+        </button>
       </div>
+
+      <!-- Divider -->
+      <div class="auth-divider"><span>or</span></div>
+
+      <!-- Email tabs -->
       <div class="auth-tabs">
-        <button class="auth-tab active" id="auth-tab-login">登录</button>
-        <button class="auth-tab" id="auth-tab-register">注册</button>
+        <button class="auth-tab active" id="auth-tab-login">Sign In</button>
+        <button class="auth-tab" id="auth-tab-register">Sign Up</button>
       </div>
 
       <!-- Login form -->
       <form class="auth-form" id="auth-login-form">
         <div class="form-group">
-          <label>邮箱</label>
+          <label>Email</label>
           <input id="login-email" type="email" placeholder="your@email.com" autocomplete="email" required />
         </div>
         <div class="form-group">
-          <label>密码</label>
+          <label>Password</label>
           <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password" required />
         </div>
         <p class="auth-error" id="login-error"></p>
-        <button type="submit" class="auth-btn">登录</button>
+        <button type="submit" class="auth-btn">Sign In</button>
       </form>
 
       <!-- Register form -->
       <form class="auth-form" id="auth-register-form" hidden>
         <div class="form-group">
-          <label>邮箱</label>
+          <label>Email</label>
           <input id="register-email" type="email" placeholder="your@email.com" autocomplete="email" required />
         </div>
         <div class="form-group">
-          <label>密码</label>
-          <input id="register-password" type="password" placeholder="至少 6 位" autocomplete="new-password" required minlength="6" />
+          <label>Password</label>
+          <input id="register-password" type="password" placeholder="At least 6 characters" autocomplete="new-password" required minlength="6" />
         </div>
         <p class="auth-error" id="register-error"></p>
-        <button type="submit" class="auth-btn">注册</button>
+        <button type="submit" class="auth-btn">Sign Up</button>
       </form>
+
+      <p class="auth-legal">
+        By continuing, you agree to our
+        <a href="#" tabindex="-1">Terms of Service</a> and
+        <a href="#" tabindex="-1">Privacy Policy</a>.
+      </p>
     </div>
   </div>
+
 </div>
 
 <!-- ── App container (hidden until logged in) ── -->
@@ -60,14 +171,22 @@
 
 <!-- ── Sidebar ── -->
 <nav id="sidebar">
+  <!-- WeekTODO logo mark -->
+  <div class="sidebar-logo" title="WeekTODO">
+    <svg viewBox="0 0 36 36" fill="none">
+      <rect width="36" height="36" rx="8" fill="#0075de"/>
+      <path d="M8 11 L13 25 L18 17 L23 25 L28 11"
+            stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
   <div class="sidebar-top">
-    <button class="sidebar-item active" data-view="week" title="周视图">
+    <button class="sidebar-item active" data-view="week" title="Week View">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="2" y="3" width="12" height="11" rx="1.5"/>
         <path d="M5 3V1.5M11 3V1.5M2 7h12"/>
       </svg>
     </button>
-    <button class="sidebar-item" data-view="all" title="所有任务">
+    <button class="sidebar-item" data-view="all" title="All Tasks">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <line x1="5.5" y1="4" x2="13" y2="4"/>
         <line x1="5.5" y1="8" x2="13" y2="8"/>
@@ -79,18 +198,12 @@
     </button>
   </div>
   <div class="sidebar-bottom">
-    <button class="sidebar-item" id="btn-ai" title="AI 任务助手">
+    <button class="sidebar-item" id="btn-ai" title="AI Assistant">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
         <path d="M8 2L9.2 5.5 13 6.5 9.5 8.2 10.5 12 8 10.2 5.5 12 6.5 8.2 3 6.5 6.8 5.5z" stroke-linejoin="round"/>
       </svg>
     </button>
-    <button class="sidebar-item" id="btn-logout" title="退出登录">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M6 3H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3"/>
-        <path d="M10 11l3-3-3-3M13 8H6"/>
-      </svg>
-    </button>
-    <button class="sidebar-item" id="btn-settings" title="设置">
+    <button class="sidebar-item" id="btn-settings" title="Settings">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
         <circle cx="8" cy="8" r="2.5"/>
         <path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>
@@ -103,10 +216,10 @@
 
   <!-- ── Week view ── -->
   <header id="week-header">
-    <button id="btn-prev" class="nav-btn" title="上一周">‹</button>
+    <button id="btn-prev" class="nav-btn" title="Previous week">‹</button>
     <h1 id="week-label"></h1>
-    <button id="btn-today" class="nav-btn today-btn">今日</button>
-    <button id="btn-next" class="nav-btn" title="下一周">›</button>
+    <button id="btn-today" class="nav-btn today-btn">Today</button>
+    <button id="btn-next" class="nav-btn" title="Next week">›</button>
   </header>
   <main id="week-grid"></main>
 
@@ -118,29 +231,29 @@
       <div id="all-filters">
         <!-- Status chips -->
         <div class="filter-group">
-          <button class="filter-chip active" data-filter="status" data-value="">全部</button>
-          <button class="filter-chip" data-filter="status" data-value="todo">待办</button>
-          <button class="filter-chip" data-filter="status" data-value="done">已完成</button>
+          <button class="filter-chip active" data-filter="status" data-value="">All</button>
+          <button class="filter-chip" data-filter="status" data-value="todo">To Do</button>
+          <button class="filter-chip" data-filter="status" data-value="done">Done</button>
         </div>
         <div class="filter-sep"></div>
         <!-- Priority chips -->
         <div class="filter-group">
-          <button class="filter-chip active" data-filter="priority" data-value="">全部</button>
+          <button class="filter-chip active" data-filter="priority" data-value="">All</button>
           <button class="filter-chip" data-filter="priority" data-value="urgent">
-            <span class="fchip-dot" style="background:#E8524A"></span>紧急
+            <span class="fchip-dot" style="background:#E8524A"></span>Urgent
           </button>
           <button class="filter-chip" data-filter="priority" data-value="important">
-            <span class="fchip-dot" style="background:#F5A623"></span>重要
+            <span class="fchip-dot" style="background:#F5A623"></span>Important
           </button>
-          <button class="filter-chip" data-filter="priority" data-value="normal">普通</button>
+          <button class="filter-chip" data-filter="priority" data-value="normal">Normal</button>
         </div>
         <div class="filter-sep"></div>
         <!-- Date range chips -->
         <div class="filter-group">
-          <button class="filter-chip active" data-filter="date" data-value="">全部日期</button>
-          <button class="filter-chip" data-filter="date" data-value="today">今天</button>
-          <button class="filter-chip" data-filter="date" data-value="week">本周</button>
-          <button class="filter-chip" data-filter="date" data-value="month">本月</button>
+          <button class="filter-chip active" data-filter="date" data-value="">All Dates</button>
+          <button class="filter-chip" data-filter="date" data-value="today">Today</button>
+          <button class="filter-chip" data-filter="date" data-value="week">This Week</button>
+          <button class="filter-chip" data-filter="date" data-value="month">This Month</button>
         </div>
       </div>
 
@@ -151,20 +264,20 @@
             <circle cx="6.5" cy="6.5" r="4"/>
             <line x1="9.5" y1="9.5" x2="13.5" y2="13.5"/>
           </svg>
-          <input id="all-search" type="text" placeholder="搜索任务…" autocomplete="off" />
+          <input id="all-search" type="text" placeholder="Search tasks…" autocomplete="off" />
         </div>
         <!-- Sort -->
         <select id="all-sort">
-          <option value="date_asc">日期 ↑ 最近</option>
-          <option value="date_desc">日期 ↓ 最远</option>
-          <option value="priority">优先级</option>
+          <option value="date_asc">Date ↑ Soonest</option>
+          <option value="date_desc">Date ↓ Latest</option>
+          <option value="priority">Priority</option>
         </select>
         <!-- New task -->
         <button id="all-btn-new">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
             <line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/>
           </svg>
-          新增任务
+          New Task
         </button>
       </div>
     </div>
@@ -175,20 +288,20 @@
       <div id="all-tasks-left">
         <div id="all-tasks-list"></div>
         <div id="all-quick-add" class="hidden">
-          <input id="all-qa-title" type="text" placeholder="任务名称…" autocomplete="off" />
+          <input id="all-qa-title" type="text" placeholder="Task name…" autocomplete="off" />
           <input id="all-qa-date"  type="date" />
           <select id="all-qa-priority">
-            <option value="normal">普通</option>
-            <option value="important">重要</option>
-            <option value="urgent">紧急</option>
+            <option value="normal">Normal</option>
+            <option value="important">Important</option>
+            <option value="urgent">Urgent</option>
           </select>
-          <button id="all-qa-submit">添加</button>
-          <button id="all-qa-cancel">取消</button>
+          <button id="all-qa-submit">Add</button>
+          <button id="all-qa-cancel">Cancel</button>
         </div>
       </div>
 
       <div id="all-tasks-right">
-        <!-- Dashboard 占位 -->
+        <!-- Dashboard placeholder -->
       </div>
 
     </div>
@@ -204,74 +317,74 @@
   <div id="modal-top">
     <div id="modal-date-label"></div>
     <div id="modal-toolbar">
-      <button class="modal-tool-btn" id="modal-btn-reminder" title="设置提醒">
+      <button class="modal-tool-btn" id="modal-btn-reminder" title="Set reminder">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M8 2a5 5 0 0 1 5 5v2l1 2H2l1-2V7a5 5 0 0 1 5-5z"/>
           <path d="M6.5 13.5a1.5 1.5 0 0 0 3 0"/>
         </svg>
       </button>
-      <button class="modal-tool-btn" id="modal-btn-color" title="颜色标签">
+      <button class="modal-tool-btn" id="modal-btn-color" title="Color label">
         <svg viewBox="0 0 16 16" fill="currentColor">
           <circle cx="8" cy="8" r="4.5"/>
         </svg>
       </button>
-      <button class="modal-tool-btn" id="modal-btn-recurring" title="循环设置">
+      <button class="modal-tool-btn" id="modal-btn-recurring" title="Recurrence">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M2 8a6 6 0 0 1 6-6 6 6 0 0 1 4.2 1.8"/>
           <path d="M14 8a6 6 0 0 1-6 6 6 6 0 0 1-4.2-1.8"/>
           <path d="M11 3.5l1.5-1.5 1.5 1.5M5 12.5l-1.5 1.5-1.5-1.5"/>
         </svg>
       </button>
-      <button class="modal-tool-btn modal-tool-btn--delete" id="modal-btn-delete" title="删除任务">
+      <button class="modal-tool-btn modal-tool-btn--delete" id="modal-btn-delete" title="Delete task">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M3 4h10M6 4V2h4v2M5 4l.5 9h5L11 4"/>
         </svg>
       </button>
-      <button class="modal-tool-btn modal-tool-btn--close" id="modal-btn-close" title="关闭">✕</button>
+      <button class="modal-tool-btn modal-tool-btn--close" id="modal-btn-close" title="Close">✕</button>
     </div>
   </div>
 
   <!-- Sub-pickers -->
   <div id="modal-color-picker" class="modal-sub-panel hidden">
-    <span class="color-swatch selected" data-color="" style="background:#E8E8E4" title="无颜色">✕</span>
+    <span class="color-swatch selected" data-color="" style="background:#E8E8E4" title="No color">✕</span>
     <!-- dynamic swatches injected by renderModalColorPicker() -->
   </div>
 
   <div id="modal-recurring-picker" class="modal-sub-panel hidden">
-    <button class="recur-btn active" data-value="">不循环</button>
-    <button class="recur-btn" data-value="daily">每天</button>
-    <button class="recur-btn" data-value="weekly">每周</button>
-    <button class="recur-btn" data-value="monthly">每月</button>
+    <button class="recur-btn active" data-value="">None</button>
+    <button class="recur-btn" data-value="daily">Daily</button>
+    <button class="recur-btn" data-value="weekly">Weekly</button>
+    <button class="recur-btn" data-value="monthly">Monthly</button>
   </div>
 
   <div id="modal-reminder-picker" class="modal-sub-panel hidden">
     <input type="datetime-local" id="modal-reminder-input" />
-    <button id="modal-reminder-clear">清除</button>
+    <button id="modal-reminder-clear">Clear</button>
   </div>
 
   <!-- Priority picker -->
   <div id="modal-priority-row" class="modal-sub-panel">
-    <button class="priority-btn active" data-priority="normal">普通</button>
+    <button class="priority-btn active" data-priority="normal">Normal</button>
     <button class="priority-btn" data-priority="important">
-      <span class="priority-dot" style="background:#F5A623"></span>重要
+      <span class="priority-dot" style="background:#F5A623"></span>Important
     </button>
     <button class="priority-btn" data-priority="urgent">
-      <span class="priority-dot" style="background:#E8524A"></span>紧急
+      <span class="priority-dot" style="background:#E8524A"></span>Urgent
     </button>
   </div>
 
   <!-- Main body -->
   <div id="modal-body">
-    <input id="modal-title-input" type="text" placeholder="任务名称…"
+    <input id="modal-title-input" type="text" placeholder="Task name…"
            autocomplete="off" spellcheck="false" />
-    <textarea id="modal-notes-input" placeholder="添加备注…"
+    <textarea id="modal-notes-input" placeholder="Add notes…"
               rows="3" spellcheck="false"></textarea>
 
     <div id="modal-subtasks-section">
       <div id="modal-subtask-list"></div>
       <div id="modal-add-subtask-row">
         <input id="modal-subtask-input" type="text"
-               placeholder="＋ 添加子任务…" autocomplete="off" />
+               placeholder="＋ Add subtask…" autocomplete="off" />
       </div>
     </div>
   </div>
@@ -280,12 +393,12 @@
 
 <!-- ── Right-click context menu (priority quick-set) ── -->
 <div id="context-menu">
-  <button class="ctx-item" data-priority="normal">普通</button>
+  <button class="ctx-item" data-priority="normal">Normal</button>
   <button class="ctx-item" data-priority="important">
-    <span class="ctx-dot" style="background:#F5A623"></span>重要
+    <span class="ctx-dot" style="background:#F5A623"></span>Important
   </button>
   <button class="ctx-item" data-priority="urgent">
-    <span class="ctx-dot" style="background:#E8524A"></span>紧急
+    <span class="ctx-dot" style="background:#E8524A"></span>Urgent
   </button>
 </div>
 
@@ -294,9 +407,9 @@
 <div id="recur-scope-dialog" role="dialog" aria-modal="true">
   <p id="recur-scope-msg"></p>
   <div id="recur-scope-btns">
-    <button id="recur-scope-single">仅此任务</button>
-    <button id="recur-scope-future">此任务及之后所有任务</button>
-    <button id="recur-scope-cancel">取消</button>
+    <button id="recur-scope-single">This event only</button>
+    <button id="recur-scope-future">This and all following</button>
+    <button id="recur-scope-cancel">Cancel</button>
   </div>
 </div>
 
@@ -316,37 +429,37 @@
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
         <path d="M8 2L9.2 5.5 13 6.5 9.5 8.2 10.5 12 8 10.2 5.5 12 6.5 8.2 3 6.5 6.8 5.5z" stroke-linejoin="round"/>
       </svg>
-      AI 任务助手
+      AI Assistant
     </span>
-    <button id="ai-panel-close" title="关闭">✕</button>
+    <button id="ai-panel-close" title="Close">✕</button>
   </div>
   <div id="ai-panel-body">
 
     <!-- Input section -->
     <div id="ai-input-section">
-      <p class="ai-hint">输入一个任务，AI 会帮你拆解成可执行的子任务</p>
+      <p class="ai-hint">Enter a task and AI will break it down into actionable subtasks.</p>
       <input id="ai-task-input" type="text"
-             placeholder="例如：完成毕业论文…" autocomplete="off" />
+             placeholder="e.g. Write a research paper…" autocomplete="off" />
       <button id="ai-decompose-btn">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
           <path d="M8 2L9.2 5.5 13 6.5 9.5 8.2 10.5 12 8 10.2 5.5 12 6.5 8.2 3 6.5 6.8 5.5z" stroke-linejoin="round"/>
         </svg>
-        拆解任务
+        Break Down
       </button>
     </div>
 
     <!-- Loading section -->
     <div id="ai-loading" class="hidden">
       <div class="ai-spinner"></div>
-      <p>AI 正在思考…</p>
+      <p>AI is thinking…</p>
     </div>
 
     <!-- Error section -->
     <div id="ai-error" class="hidden">
       <p id="ai-error-msg"></p>
       <div class="ai-err-btns">
-        <button class="ai-err-btn" id="ai-retry-btn">重试</button>
-        <button class="ai-err-btn" id="ai-back-btn">返回</button>
+        <button class="ai-err-btn" id="ai-retry-btn">Retry</button>
+        <button class="ai-err-btn" id="ai-back-btn">Back</button>
       </div>
     </div>
 
@@ -354,12 +467,12 @@
     <div id="ai-result" class="hidden">
       <div id="ai-result-header">
         <div class="ai-result-task-name" id="ai-result-task-name"></div>
-        <p class="ai-result-hint">AI 建议将其拆解为：</p>
+        <p class="ai-result-hint">AI suggests breaking this into:</p>
       </div>
       <div id="ai-subtasks"></div>
       <div id="ai-result-footer">
-        <button id="ai-add-all-btn">全部添加到日程</button>
-        <button id="ai-regen-btn">重新生成</button>
+        <button id="ai-add-all-btn">Add All to Schedule</button>
+        <button id="ai-regen-btn">Regenerate</button>
       </div>
     </div>
 
@@ -377,30 +490,30 @@
         <circle cx="8" cy="8" r="2.5"/>
         <path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>
       </svg>
-      设置
+      Settings
     </span>
-    <button id="settings-close" title="关闭">✕</button>
+    <button id="settings-close" title="Close">✕</button>
   </div>
 
   <div id="settings-body">
 
     <!-- Theme -->
     <div class="settings-section">
-      <div class="settings-section-title">外观</div>
+      <div class="settings-section-title">Appearance</div>
       <div id="theme-options">
         <label class="theme-option" data-theme-val="light">
           <span class="theme-icon">☀</span>
-          <span class="theme-label">浅色</span>
+          <span class="theme-label">Light</span>
           <span class="theme-radio-dot"></span>
         </label>
         <label class="theme-option" data-theme-val="dark">
           <span class="theme-icon">🌙</span>
-          <span class="theme-label">深色</span>
+          <span class="theme-label">Dark</span>
           <span class="theme-radio-dot"></span>
         </label>
         <label class="theme-option" data-theme-val="system">
           <span class="theme-icon">⚙</span>
-          <span class="theme-label">跟随系统</span>
+          <span class="theme-label">System</span>
           <span class="theme-radio-dot"></span>
         </label>
       </div>
@@ -408,9 +521,21 @@
 
     <!-- Color Tags -->
     <div class="settings-section">
-      <div class="settings-section-title">颜色标签</div>
+      <div class="settings-section-title">Color Labels</div>
       <div id="color-manager"></div>
-      <button id="color-add-btn">＋ 添加颜色</button>
+      <button id="color-add-btn">＋ Add Color</button>
+    </div>
+
+    <!-- Account -->
+    <div class="settings-section">
+      <div class="settings-section-title">Account</div>
+      <button id="btn-logout" class="settings-logout-btn">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M6 3H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3"/>
+          <path d="M10 11l3-3-3-3M13 8H6"/>
+        </svg>
+        Sign Out
+      </button>
     </div>
 
   </div>

@@ -1,70 +1,72 @@
-# CLAUDE.md - 项目说明文件
+# CLAUDE.md — Project Reference for Claude Code
 
-> 这个文件是给 Claude Code 阅读的项目上下文。每次开始新对话时，Claude Code 会自动读取此文件。
-
----
-
-## 项目概述
-
-**极简周计划待办管理器** - 一款以「极简周视图」为核心的待办事项管理器。
-
-设计灵感：
-- **Tweek.so**：纸张质感美学、横线背景、极简风格
-- **WeekToDo**：父子任务交互逻辑
-
-核心理念：用数字化的方式还原一张真实的周计划纸，让任务管理回归简洁。
+> This file is read automatically by Claude Code at the start of every session.
 
 ---
 
-## 技术栈
+## Project Overview
 
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| 后端 | Flask 3.x | REST API + SSE 推送 |
-| 认证 | Supabase Auth | 邮箱+密码注册/登录，JWT Bearer Token |
-| 数据存储 | Supabase PostgreSQL | tasks 表，Row Level Security |
-| 定时任务 | APScheduler | 每分钟检查任务提醒 |
-| 前端 | 原生 HTML/CSS/JS | 单页应用，fetch 调用 API |
-| AI 服务 | DeepSeek API | 任务拆解功能 |
+**WeekTODO** — A minimal week-view task manager. Think of it as a digital notebook: ruled lines, a paper-like aesthetic, and a simple week grid as the primary interface.
+
+Design inspiration:
+- **Tweek.so**: paper texture, notebook ruled lines, minimal chrome
+- **WeekToDo**: parent/child task interaction model
+- **Notion**: design system tokens, Inter font, warm neutrals, multi-layer shadows
+
+Core philosophy: restore the clarity of a physical week planner in digital form.
 
 ---
 
-## 目录结构
+## Tech Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| Backend | Flask 3.x | REST API + SSE push |
+| Auth | Supabase Auth | Email/password + OAuth (Google, GitHub); JWT Bearer tokens |
+| Database | Supabase PostgreSQL | `tasks` table, Row Level Security |
+| Scheduler | APScheduler | Per-minute deadline reminders |
+| Frontend | Vanilla HTML/CSS/JS | SPA, fetch-based API calls |
+| AI | DeepSeek API | Task decomposition |
+
+---
+
+## Directory Structure
 
 ```
-项目根目录/
+project-root/
 ├── src/
-│   ├── app.py                  # Flask 主程序 + 所有路由（含认证路由）
-│   ├── models.py               # Task 数据模型 + Supabase 读写
-│   ├── supabase_client.py      # Supabase 客户端工厂（service key / anon key）
-│   ├── scheduler.py            # APScheduler 定时提醒（直接查 Supabase）
-│   ├── ai_service.py           # AI 任务拆解服务
+│   ├── app.py                  # Flask entry point — all REST routes + SSE
+│   ├── models.py               # Task data model + Supabase read/write
+│   ├── supabase_client.py      # Supabase client factory (strips proxy env vars)
+│   ├── scheduler.py            # APScheduler deadline reminders
+│   ├── ai_service.py           # AI task decomposition (DeepSeek)
 │   ├── templates/
-│   │   └── index.html          # 单页前端入口（含认证页）
+│   │   └── index.html          # Single-page app entry (auth + app views)
 │   └── static/
-│       ├── style.css           # 全局样式（含深色主题、Dashboard、认证页）
-│       ├── auth.js             # 认证模块：Auth 对象、登录/注册表单逻辑
-│       └── app.js              # 前端主逻辑（周视图、所有任务、Dashboard、设置）
+│       ├── style.css           # All styles (Notion design system, dark theme, auth page)
+│       ├── auth.js             # Auth module: Auth object, email forms, OAuth flow
+│       └── app.js              # App logic: week view, all-tasks, dashboard, settings
 ├── data/
-│   └── tasks.json              # 已弃用（迁移至 Supabase 后保留作备份）
-├── .env                        # 环境变量（API Key，已加入 .gitignore）
+│   └── tasks.json              # Deprecated (kept as backup after Supabase migration)
+├── .env                        # Secret env vars — never commit
 ├── requirements.txt
-└── CLAUDE.md                   # 本文件
+├── DESIGN.md                   # Notion-inspired design system specification
+└── CLAUDE.md                   # This file
 ```
 
 ---
 
-## 数据结构
+## Data Structure
 
-### Task 对象
+### Task Object
 
-`children` 字段**不存储**在 Supabase，每次从数据库加载后由 `_rebuild_children()` 根据 `parent_id` 动态重建。
+The `children` field is **not stored** in Supabase. It is rebuilt at runtime by `_rebuild_children()` from `parent_id` relationships after every `load_tasks()` call.
 
 ```json
 {
   "id": "uuid-string",
   "user_id": "supabase-auth-uuid",
-  "title": "任务名称",
+  "title": "Task title",
   "done": false,
   "day": "2026-04-09",
   "deadline": "2026-04-09T18:00",
@@ -73,7 +75,7 @@
   "parent_id": null,
   "children": [],
   "color": "blue",
-  "notes": "备注内容",
+  "notes": "Optional notes",
   "recurring": "daily",
   "recurring_origin": null,
   "recurring_end": null,
@@ -85,34 +87,34 @@
 }
 ```
 
-### 字段说明
+### Field Reference
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | string | UUID，主键 |
-| user_id | string | Supabase auth.users 的 UUID |
-| title | string | 任务标题 |
-| done | boolean | 完成状态 |
-| day | string | 归属日期 YYYY-MM-DD |
-| deadline | string/null | 提醒时间 ISO 格式 |
-| reminded | boolean | 是否已提醒 |
-| priority | string | normal / important / urgent |
-| parent_id | string/null | 父任务 ID |
-| children | array | 运行时重建，不入库 |
-| color | string/null | 颜色标签 key（见颜色系统） |
-| notes | string | 备注 |
-| recurring | string/null | 循环规则：daily/weekly/monthly |
-| recurring_origin | string/null | 循环实例指向模板任务的 ID |
-| recurring_end | string/null | 循环结束日期 YYYY-MM-DD |
-| deleted_dates | array | 模板任务上记录已跳过的日期 |
-| order | number | 排序顺序（同日列内） |
-| created_at | string | 创建时间 ISO |
-| estimated_time | number/null | 预估时间（分钟） |
-| ai_group_id | string/null | AI 拆解批次 ID，同组任务共享 |
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | UUID primary key |
+| user_id | string | Supabase auth.users UUID |
+| title | string | Task title |
+| done | boolean | Completion state |
+| day | string | Date YYYY-MM-DD |
+| deadline | string/null | Reminder time ISO format |
+| reminded | boolean | Whether reminder has fired |
+| priority | string | `normal` / `important` / `urgent` |
+| parent_id | string/null | Parent task ID |
+| children | array | Runtime-rebuilt, never stored |
+| color | string/null | Color label key (see color system) |
+| notes | string | Free-form notes |
+| recurring | string/null | `daily` / `weekly` / `monthly` |
+| recurring_origin | string/null | Instance → template task ID |
+| recurring_end | string/null | Recurrence end date YYYY-MM-DD |
+| deleted_dates | array | Dates skipped on template task |
+| order | number | Sort order within day column |
+| created_at | string | Creation time ISO |
+| estimated_time | number/null | Estimated minutes |
+| ai_group_id | string/null | AI decomposition batch ID |
 
-### Supabase 建表 SQL
+### Supabase Table SQL
 
-每次新部署或新 Supabase 项目时需在 SQL Editor 中执行：
+Run this in Supabase SQL Editor on every new deployment:
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.tasks (
@@ -150,268 +152,341 @@ CREATE INDEX IF NOT EXISTS tasks_day_idx     ON public.tasks(day);
 
 ---
 
-## API 接口
+## API Routes
 
-所有任务相关接口均需要 `Authorization: Bearer <token>` 请求头。
+All task routes require `Authorization: Bearer <token>`.
 
-### 认证接口（无需 Token）
+### Auth Routes (no token required)
 
-| 方法 | 路由 | 功能 |
-|------|------|------|
-| POST | /api/auth/register | 注册（邮箱+密码） |
-| POST | /api/auth/login | 登录，返回 access_token |
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | /api/auth/register | Register with email + password |
+| POST | /api/auth/login | Login, returns `access_token` |
+| POST | /api/auth/logout | Invalidate session |
+| GET | /api/auth/me | Returns `user_id` for current token |
 
-### 任务接口（需要 Token）
+### Task Routes (token required)
 
-| 方法 | 路由 | 功能 |
-|------|------|------|
-| GET | /api/tasks | 获取周任务（?week_start=YYYY-MM-DD） |
-| GET | /api/tasks/all | 获取全部任务（所有任务视图用） |
-| POST | /api/tasks | 新增任务 |
-| PUT | /api/tasks/\<id\> | 修改任务（支持 scope） |
-| DELETE | /api/tasks/\<id\> | 删除任务（支持 scope） |
-| POST | /api/tasks/\<id\>/subtasks | 添加子任务 |
-| POST | /api/tasks/reorder | 批量更新排序（拖拽用） |
-| GET | /api/stream | SSE 提醒推送（无需 Token） |
-| POST | /api/ai/decompose | AI 任务拆解 |
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | /api/tasks | Get week tasks (`?week_start=YYYY-MM-DD`) |
+| GET | /api/tasks/all | Get all tasks (all-tasks view) |
+| POST | /api/tasks | Create task |
+| PUT | /api/tasks/\<id\> | Update task (supports `scope`) |
+| DELETE | /api/tasks/\<id\> | Delete task (supports `scope`) |
+| POST | /api/tasks/\<id\>/subtasks | Add subtask |
+| POST | /api/tasks/reorder | Bulk reorder (drag-and-drop) |
+| GET | /api/stream | SSE reminder stream (no token needed) |
+| POST | /api/ai/decompose | AI task decomposition |
 
-### scope 参数说明
+### `scope` Parameter
 
-`PUT` 和 `DELETE` 请求中可携带 `scope` 字段：
+Carried in PUT/DELETE request body (or query string for DELETE):
 
-| scope | 说明 |
-|-------|------|
-| `single`（默认）| 仅操作当前任务 |
-| `future` | 当前任务及其之后所有同系列循环实例 |
-| `ai_group` | 操作同一 AI 拆解批次的所有任务 |
-
----
-
-## 认证系统
-
-### 前端（auth.js）
-
-- `Auth` 对象统一管理 JWT Token（存于 `localStorage['wp_auth_token']`）
-- `Auth.login(email, password)` / `Auth.register()` / `Auth.logout()`
-- `showAuthPage()` / `showAppPage()` 切换认证页与应用页
-- 页面加载时：已登录 → 直接显示应用并调用 `init()`；未登录 → 显示认证页
-- 认证成功后调用 `init()` 启动应用
-
-### 前端（app.js）
-
-- `api.call()` 自动注入 `Authorization: Bearer <token>` 请求头
-- 收到 401 响应时自动清除 Token 并跳转认证页
-- `init()` 不再直接绑定 `DOMContentLoaded`，由 `auth.js` 控制调用时机
-
-### 后端（app.py）
-
-- `@login_required` 装饰器：验证 Bearer Token → 写入 `flask.g.user_id`
-- 使用 `supabase_client.get_auth().auth.get_user(token)` 验证 JWT
-
-### 客户端分工（supabase_client.py）
-
-| 函数 | 使用的 Key | 用途 |
-|------|-----------|------|
-| `get_db()` | SUPABASE_SECRET_KEY | 所有数据库读写（绕过 RLS） |
-| `get_auth()` | SUPABASE_ANON_KEY | 用户注册/登录/Token 验证 |
+| scope | Behavior |
+|-------|----------|
+| `single` (default) | Current task only |
+| `future` | This task and all future instances in the series |
+| `ai_group` | All tasks in the same AI decomposition batch |
 
 ---
 
-## 核心功能与逻辑
+## Auth System
 
-### 1. 周视图布局
+### Frontend (auth.js)
 
-- **6 列**：周一到周五各一列，周六+周日合并为第六列（`.weekend-col`）
-- **横线背景**：`repeating-linear-gradient` 每 40px 一条，模拟笔记本内页
-- **今日高亮**：当前日期列背景色 `#F0EEE8`
-- **行高必须是精确值**：`.task-row { height: 40px }` 而非 `min-height`，否则有颜色 pill 时行高溢出导致横线错位
+- `Auth` object manages JWT token in `localStorage['wp_auth_token']`
+- `Auth.login()` / `Auth.register()` / `Auth.logout()` / `Auth.signInWithOAuth(provider)`
+- `showAuthPage()` / `showAppPage()` toggle between auth and app views
+- On load: if token present → show app and call `init()`; if not → show auth page
+- OAuth (Google/GitHub): uses Supabase JS SDK (`supabase.createClient()`)
+  - `signInWithOAuth({ provider, redirectTo })` triggers browser redirect
+  - `_handleOAuthCallback()` checks URL hash on return, calls `client.auth.getSession()`, stores token
+  - Hash is cleaned from URL with `history.replaceState()` after extraction
 
-### 2. 父子任务
+### Frontend (app.js)
 
-- 最多 2 级（父 → 子）
-- 子任务全部完成 → 父任务自动完成
-- 父任务不能直接勾选，只能通过子任务驱动
-- 删除父任务时，子任务一并删除（`delete_task_recursive`）
+- `api.call()` automatically injects `Authorization: Bearer <token>`
+- 401 response → clears token, shows auth page
+- `init()` is called by `auth.js`, not bound to `DOMContentLoaded` directly
 
-### 3. 循环任务（重要！）
+### Backend (app.py)
 
-采用**实例化方案**（非虚拟任务）：
+- `@login_required` decorator: validates Bearer token → sets `flask.g.user_id`
+- Uses `supabase_client.get_auth().auth.get_user(token)` for JWT validation
 
-- 数据库存储一条**模板任务**（`recurring_origin = null`）
-- 每次查询周视图时，`generate_recurring_instances()` 为当周各日期生成**实际实例**（`recurring_origin = 模板ID`）并写入数据库
-- `deleted_dates`（在模板任务上）记录已跳过的日期，防止重新生成
-- `recurring_end` 控制循环终止日期
+### Supabase Client (supabase_client.py)
 
-```python
-# 判断模板是否应在某日显示（should_show_recurring_on_date）
-daily   → 始终显示
-weekly  → 与模板同星期几
-monthly → 与模板同日期
+| Function | Key Used | Purpose |
+|----------|----------|---------|
+| `get_db()` | `SUPABASE_SECRET_KEY` | All DB read/write (bypasses RLS) |
+| `get_auth()` | `SUPABASE_ANON_KEY` | User registration, login, token validation |
+
+**Proxy stripping**: `supabase_client.py` removes `HTTP_PROXY`, `HTTPS_PROXY`, and related env vars at module load time. This prevents system VPN/proxy settings (e.g. Clash) from intercepting and breaking Supabase HTTPS connections.
+
+### OAuth Setup (Supabase Dashboard)
+
+To enable Google/GitHub login:
+1. Supabase Dashboard → Authentication → Providers
+2. Enable Google: create OAuth app in Google Cloud Console, paste Client ID + Secret
+3. Enable GitHub: create OAuth app in GitHub Developer Settings, paste Client ID + Secret
+4. Add your app's redirect URL to each provider's allowlist: `https://your-domain.com/`
+5. Add the Supabase callback URL to each provider (shown in Supabase Dashboard)
+
+---
+
+## Core Features & Logic
+
+### 1. Week View Layout
+
+- **6 columns**: Mon–Fri one column each, Sat+Sun merged into column 6 (`.weekend-col`)
+- **Ruled lines**: `repeating-linear-gradient` every 40px, simulating notebook paper
+- **Today highlight**: current date column gets `var(--today-bg)` background
+- **Row height**: `.task-row { height: 40px }` must be exact — `min-height` causes misalignment with ruled lines when color pills are present
+
+### 2. Parent/Child Tasks
+
+- Max 2 levels (parent → child only)
+- All children done → parent auto-completes
+- Parent cannot be checked directly; state is driven by children
+- Deleting a parent deletes all children (`delete_task_recursive`)
+
+### 3. Recurring Tasks
+
+Uses an **instantiation approach** (not virtual/computed tasks):
+
+- DB stores one **template task** (`recurring_origin = null`)
+- `generate_recurring_instances()` creates **real instances** (`recurring_origin = template_id`) for each week when the week view is loaded
+- `deleted_dates` on the template records skipped dates
+- `recurring_end` limits the series end date
+
+```
+daily   → show every day
+weekly  → show on same weekday as template
+monthly → show on same day-of-month as template
 ```
 
-### 4. 颜色标签系统（可自定义）
+### 4. Color Label System (User-Customizable)
 
-颜色不再是静态枚举，而是**用户可自定义**的标签系统：
+Colors are a user-defined label system, not a static enum:
 
-- 内置 5 个颜色（key 固定，名称/色值可改）：
-  - `blue` → #4A90D9（默认名：Study）
-  - `green` → #52B788（默认名：Relax）
-  - `red` → #E8524A（默认名：Urgent）
-  - `yellow` → #F5A623（默认名：Focus）
-  - `purple` → #9B59B6（默认名：Personal）
-- 用户可通过设置面板修改名称、色值，或新增自定义颜色
-- 数据存储于 `localStorage['user-colors']`，格式：`[{key, hex, name}]`
-- CSS 颜色规则由 `injectColorStyles()` 动态注入 `<style id="dynamic-color-styles">`
-- `COLOR_MAP` 是 Proxy 对象，兼容旧代码引用方式
+- 5 built-in colors (keys are fixed; name/hex are user-editable):
+  - `blue` → #4A90D9 (default: "Study")
+  - `green` → #52B788 (default: "Relax")
+  - `red` → #E8524A (default: "Urgent")
+  - `yellow` → #F5A623 (default: "Focus")
+  - `purple` → #9B59B6 (default: "Personal")
+- Stored in `localStorage['user-colors']` as `[{key, hex, name}]`
+- CSS rules injected dynamically by `injectColorStyles()` into `<style id="dynamic-color-styles">`
+- `COLOR_MAP` is a Proxy object for backwards compatibility
 
-### 5. 主题系统（深色/浅色/跟随系统）
+### 5. Theme System
 
-- `localStorage['theme-mode']`：`'light'` / `'dark'` / `'system'`
-- 通过 `html[data-theme="dark"]` 选择器切换深色变量
-- 深色主题基调：`#0D1521`（主背景）、`#1B2D3E`（分隔线）
-- `applyTheme()` 在 `init()` 最开始调用，避免闪烁
+- `localStorage['theme-mode']`: `'light'` / `'dark'` / `'system'`
+- `html[data-theme="dark"]` selector triggers dark variables
+- Dark theme is **Notion Warm Dark** (brown-tinted neutrals, not deep blue):
+  - `--bg: #31302e`, `--bg-subtle: #282624`
+  - `--divider: rgba(255,255,255,0.1)`
+  - `--ink: rgba(255,255,255,0.92)`, `--ink-light: rgba(255,255,255,0.58)`
+- `applyTheme()` is called at the start of `init()` to prevent flash
 
-### 6. Dashboard（所有任务视图右侧面板）
+### 6. Dashboard (All-Tasks view right panel)
 
-三张数据卡片，随筛选条件实时更新（`renderDashboard(filtered)`）：
+Three data cards updated in real time with `renderDashboard(filtered)`:
 
-| 卡片 | 内容 | 数据来源 |
-|------|------|---------|
-| 完成进度 | 水波纹动画圆形，显示完成百分比 | 当前筛选后的根任务 |
-| 本周日程 | Canvas 柱状图，7 天已完成/总数 | `state.tasks` 全量（忽略日期筛选） |
-| 颜色分布 | SVG 矩阵树图 + 图例 | 当前筛选后的根任务 |
+| Card | Content | Data source |
+|------|---------|-------------|
+| Completion | Wave-animation circle, % done | Filtered root tasks |
+| Weekly Schedule | Canvas bar chart, 7-day done/total | `state.tasks` full set (ignores date filter) |
+| Color Distribution | SVG treemap + legend | Filtered root tasks |
 
-- 矩阵树图使用 `squarify()` 算法，tile 内只显示数量（不显示颜色名）
-- 柱状图点击列 → 跳转到对应周的周视图
+- Treemap uses `squarify()` algorithm; tiles show count only
+- Bar chart click → navigates to that week in week view
 
-### 7. AI 任务拆解
+### 7. AI Task Decomposition
 
-- 调用 DeepSeek API（`/api/ai/decompose`）
-- 返回子任务列表，用户可全部添加到日程
-- 同一批次任务共享 `ai_group_id`（`crypto.randomUUID()` 生成）
-- 支持 `scope=ai_group` 批量操作整批任务
+- Calls `/api/ai/decompose` → DeepSeek API
+- Returns subtask list; user can bulk-add to schedule
+- Batch tasks share an `ai_group_id` (`crypto.randomUUID()`)
+- `scope=ai_group` operates on all tasks in a batch
 
-### 8. 任务提醒
+### 8. Task Reminders
 
-- APScheduler 每分钟查询 Supabase 中 `reminded=false, done=false` 且 `deadline ≤ now` 的任务
-- 直接 update 单条记录的 `reminded=true`（不再 load+save 全量）
-- 通过 SSE 广播到所有连接的客户端
-- 前端同时触发浏览器 Notification
-
----
-
-## UI 设计规范
-
-### CSS 变量（浅色主题）
-
-| 变量 | 色值 | 用途 |
-|------|------|------|
-| `--bg` | #FAFAF8 | 主背景 |
-| `--divider` | #E8E8E4 | 分隔线/横线 |
-| `--header-text` | #AAAAAA | 星期标题 |
-| `--today-bg` | #F0EEE8 | 今日列背景 |
-| `--accent` | #4A90D9 | 主强调色 |
-| `--urgent` | #E8524A | 紧急优先级 |
-| `--important` | #F5A623 | 重要优先级 |
-| `--ink` | #333330 | 正文颜色 |
-| `--ink-light` | #888880 | 次要文字 |
-| `--ink-faint` | #BBBBB6 | 辅助/占位文字 |
-
-### CSS 变量（深色主题 `html[data-theme="dark"]`）
-
-| 变量 | 色值 |
-|------|------|
-| `--bg` | #0D1521 |
-| `--divider` | #1B2D3E |
-| `--ink` | #BED0E2 |
-| `--ink-light` | #7A9AB5 |
-| `--today-bg` | #0F1E30 |
-
-### 交互规范
-
-- 动画时长：`200ms ease`（`--ease` 变量）
-- 完成任务：删除线 + `opacity: 0.4`
-- 字体：系统字体，字重 300-400，极简风格
-- 大量留白，不添加多余装饰
+- APScheduler polls Supabase every minute for tasks where `reminded=false, done=false, deadline ≤ now`
+- Updates `reminded=true` directly on the single record
+- Broadcasts via SSE to all connected clients
+- Frontend triggers browser `Notification` API
 
 ---
 
-## 环境变量
+## UI Design System
+
+Styles follow the specification in `DESIGN.md` (Notion-inspired warm neutral system).
+
+### CSS Tokens — Light Theme (`:root`)
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `--bg` | `#ffffff` | Main canvas |
+| `--bg-subtle` | `#f6f5f4` | Warm white surface / today column |
+| `--divider` | `rgba(0,0,0,0.1)` | Borders, ruled lines |
+| `--header-text` | `#a39e98` | Weekday header labels |
+| `--today-bg` | `#f6f5f4` | Today column background |
+| `--accent` | `#0075de` | Notion Blue — primary CTA |
+| `--accent-hover` | `#005bab` | Button hover state |
+| `--accent-focus` | `#097fe8` | Focus ring |
+| `--badge-bg` | `#f2f9ff` | Pill badge background |
+| `--badge-text` | `#097fe8` | Pill badge text |
+| `--urgent` | `#e53935` | Urgent priority |
+| `--important` | `#f59e0b` | Important priority |
+| `--ink` | `rgba(0,0,0,0.92)` | Body text |
+| `--ink-light` | `#615d59` | Secondary text |
+| `--ink-faint` | `#a39e98` | Placeholder / tertiary |
+| `--radius` | `8px` | Standard radius |
+| `--radius-sm` | `4px` | Button/input radius |
+| `--radius-lg` | `12px` | Card/modal radius |
+| `--shadow-card` | 4-layer warm shadow | Cards, menus |
+| `--shadow-modal` | 5-layer deep shadow | Modals, panels |
+
+### CSS Tokens — Dark Theme (`html[data-theme="dark"]`)
+
+| Variable | Value |
+|----------|-------|
+| `--bg` | `#31302e` |
+| `--bg-subtle` | `#282624` |
+| `--divider` | `rgba(255,255,255,0.1)` |
+| `--header-text` | `#6b6560` |
+| `--today-bg` | `#282624` |
+| `--accent` | `#62aef0` |
+| `--accent-hover` | `#7fbff5` |
+| `--badge-bg` | `rgba(98,174,240,0.18)` |
+| `--badge-text` | `#62aef0` |
+| `--ink` | `rgba(255,255,255,0.92)` |
+| `--ink-light` | `rgba(255,255,255,0.58)` |
+| `--ink-faint` | `rgba(255,255,255,0.3)` |
+
+### Typography
+
+- Font: `'Inter'` (Google Fonts, 400/500/600/700), with system fallbacks
+- Font stack excludes CJK system fonts (Chinese chars render via Unicode fallback)
+- Weight scale: 400 body, 500 UI interactive, 600 headings/labels, 700 display numbers
+
+### Button Variants
+
+| Variant | Style |
+|---------|-------|
+| Primary | `--accent` bg, white text, 4px radius, `scale(0.9)` active |
+| Secondary | `rgba(0,0,0,0.05)` bg, `--ink` text |
+| Ghost | Transparent, `--ink-light` text, underline on hover |
+| Pill Badge (filter chips active) | `--badge-bg` bg, `--badge-text` text, 9999px radius, 600 weight |
+| Destructive (sign out) | Ghost style, turns `--urgent` on hover with red-tinted border |
+
+### Auth Page (Two-Column Layout)
+
+- **Left column** (55%, `#f6f5f4`): WeekTODO logo + branding, headline, feature bullet points, decorative week-grid SVG illustration
+- **Right column** (45%, `#ffffff`): OAuth buttons (Google, GitHub), email/password form with tab switcher
+- Stacks vertically on screens ≤ 768px
+
+### Sidebar
+
+- Width: `64px`, fixed left
+- WeekTODO SVG logo at top (36×36 white "W" on Notion Blue rounded square)
+- Icon-only nav items, 40×40 touch target, 20px SVG icons
+- `#app` has `margin-left: 64px`
+
+### Sign Out
+
+Sign out button lives in the Settings panel ("Account" section), not the sidebar. Uses ghost-destructive button style per DESIGN.md.
+
+---
+
+## Environment Variables
 
 ```env
-# .env 文件（不提交到 git）
+# .env (never commit to git)
 
-# AI 服务
+# AI service
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # Supabase
 SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_ANON_KEY=sb_publishable_xxx   # 用于用户注册/登录/Token 验证
-SUPABASE_SECRET_KEY=sb_secret_xxx      # 用于后端数据读写（绕过 RLS）
+SUPABASE_ANON_KEY=eyJ...   # Used for user auth + token validation (anon/publishable)
+SUPABASE_SECRET_KEY=eyJ... # Used for DB read/write server-side (service_role/secret)
 ```
 
 ---
 
-## 开发注意事项
+## Development Notes
 
-1. **保持极简风格**：不添加过多装饰元素，动画克制
-2. **颜色使用动态系统**：通过 `getColorHex(key)` 和 `getColorName(key)` 获取，不要硬编码色值
-3. **循环任务**：`generate_recurring_instances()` 会生成实际数据库记录；删除/修改循环任务时注意 `scope` 参数
-4. **children 字段**：不存入 Supabase，每次 `load_tasks()` 后由 `_rebuild_children()` 重建，勿手动维护
-5. **行高对齐**：周视图 `.task-row` 必须使用精确 `height: 40px`，确保横线不错位
-6. **auth.js 加载顺序**：`auth.js` 必须在 `app.js` 之前加载，负责决定何时调用 `init()`
-7. **API 调用**：所有 `api.call()` 自动带 Token，无需手动添加；新增 API 路由时记得加 `@login_required`
-8. **save_tasks 性能**：每次调用会 upsert 全量任务并 delete 移除的任务，对单用户小数据量可接受
+1. **Keep it minimal**: no unnecessary decorations; animations are constrained (`150ms ease`)
+2. **Color system**: always use `getColorHex(key)` / `getColorName(key)` — never hardcode hex values for task colors
+3. **Recurring tasks**: `generate_recurring_instances()` writes real DB records; always pass correct `scope` on mutations
+4. **`children` field**: never store in Supabase; always rebuilt by `_rebuild_children()` after `load_tasks()`
+5. **Row height**: `.task-row` must use exact `height: 40px` — not `min-height` — or ruled lines misalign
+6. **Script load order**: `auth.js` must load before `app.js`; it controls when `init()` is called
+7. **API calls**: `api.call()` auto-injects the token; new routes must have `@login_required`
+8. **Proxy env vars**: `supabase_client.py` strips `HTTP_PROXY`/`HTTPS_PROXY` at import time — do not remove this
+9. **Supabase JS SDK**: loaded from CDN in `index.html`; `window.SUPABASE_URL` and `window.SUPABASE_ANON_KEY` are injected as template variables by Flask
 
-### 常见问题
+### FAQs
 
-**Q: 循环任务如何跳过某一天？**
-A: 在**模板任务**的 `deleted_dates` 数组中添加该日期字符串，`generate_recurring_instances()` 会跳过它
+**Q: How do I skip one occurrence of a recurring task?**
+A: Add the date string to `deleted_dates` on the **template task**. `generate_recurring_instances()` will skip it.
 
-**Q: 周视图从哪天开始？**
-A: 自然周，周一到周日
+**Q: What day does the week start on?**
+A: Monday (ISO week). The last column is Sat+Sun merged.
 
-**Q: 任务颜色和优先级的关系？**
-A: 完全独立。颜色是卡片背景色（用户自选，可自定义），优先级是左侧小圆点（紧急红/重要橙）
+**Q: What's the relationship between color and priority?**
+A: Independent. Color is the task's background pill (user-chosen label). Priority is the left-edge dot (urgent = red, important = orange).
 
-**Q: 新部署如何初始化数据库？**
-A: 在 Supabase SQL Editor 中执行本文件「数据结构」章节中的建表 SQL
+**Q: Why does `color` store a key like `"blue"` instead of a hex?**
+A: Users can rename/recolor labels. Storing the key decouples data from presentation.
 
-**Q: 为什么 color 字段存的是 key（如 "blue"）而不是 hex？**
-A: 颜色名称和 hex 由用户自定义，存 key 可保持数据与展示解耦
-
----
-
-## 已完成功能
-
-- [x] 周视图核心功能（6 列布局、横线背景、今日高亮）
-- [x] 父子任务（最多 2 级，子驱动父）
-- [x] 任务提醒（APScheduler + SSE + 浏览器通知）
-- [x] 循环任务（实例化方案，支持 daily/weekly/monthly）
-- [x] 拖拽排序
-- [x] 侧边栏导航（周视图 / 所有任务）
-- [x] 所有任务视图（筛选、搜索、排序）
-- [x] Dashboard 面板（水波纹进度圈、周日程柱状图、颜色矩阵树图）
-- [x] AI 任务拆解助手（DeepSeek API）
-- [x] 设置面板（主题切换、颜色标签自定义）
-- [x] 深色主题
-- [x] 用户认证系统（Supabase Auth，邮箱+密码）
-- [x] 云端数据持久化（Supabase PostgreSQL）
+**Q: Why does OAuth fail with "Unsupported provider"?**
+A: The provider hasn't been enabled in Supabase Dashboard. See the OAuth Setup section above.
 
 ---
 
-## 文件修改记录
+## Completed Features
 
-| 日期 | 修改内容 |
-|------|----------|
-| 2026-04-09 | 初始版本，完成核心功能 |
-| 2026-04-10 | 修复循环任务逻辑，改为实例化方案 |
-| 2026-04-10 | UI 调整：颜色改为背景色，添加横线 |
-| 2026-04-11 | Dashboard、设置面板、深色主题、颜色标签自定义 |
-| 2026-04-11 | Supabase 用户认证 + 云端数据持久化 |
+- [x] Week view (6-column layout, ruled lines, today highlight)
+- [x] Parent/child tasks (max 2 levels, child-driven completion)
+- [x] Task reminders (APScheduler + SSE + browser Notification)
+- [x] Recurring tasks (instantiation model: daily/weekly/monthly)
+- [x] Drag-and-drop reorder
+- [x] Sidebar navigation (week view / all tasks)
+- [x] All-tasks view (filter, search, sort)
+- [x] Dashboard panel (wave progress circle, weekly bar chart, color treemap)
+- [x] AI task decomposition (DeepSeek API)
+- [x] Settings panel (theme switcher, color label customization)
+- [x] Light/dark/system theme (Notion Warm Dark palette)
+- [x] User auth (Supabase Auth — email/password + OAuth Google/GitHub)
+- [x] Cloud persistence (Supabase PostgreSQL + RLS)
+- [x] Notion-inspired UI redesign (Inter font, warm neutrals, multi-layer shadows, DESIGN.md)
+- [x] English-only UI
+- [x] Two-column auth page (WeekTODO branding + feature marketing)
+- [x] WeekTODO logo (SVG, inline)
+- [x] Sign Out moved to Settings panel (ghost-destructive button)
 
 ---
 
-*最后更新：2026-04-11*
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-04-09 | Initial version — core week view features |
+| 2026-04-10 | Recurring task fix — switched to instantiation model |
+| 2026-04-10 | UI: color as background pill, add ruled lines |
+| 2026-04-11 | Dashboard, settings panel, dark theme, color label customization |
+| 2026-04-11 | Supabase auth + cloud persistence |
+| 2026-04-11 | Notion UI redesign: DESIGN.md tokens, Inter font, Warm Dark theme |
+| 2026-04-11 | English-only UI, two-column auth page, WeekTODO branding |
+| 2026-04-11 | OAuth (Google/GitHub) via Supabase JS SDK |
+| 2026-04-11 | Sidebar: 64px width, WeekTODO logo, sign out moved to settings |
+| 2026-04-11 | Supabase proxy stripping fix (VPN/Clash compatibility) |
+
+---
+
+*Last updated: 2026-04-11*

@@ -31,3 +31,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Claude Code session files
+.claude/
+
+# pip install artifact (mistyped command)
+=*
