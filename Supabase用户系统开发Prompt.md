@@ -12,9 +12,9 @@
 
 ```env
 # Supabase 配置
-SUPABASE_URL=https://tuiidrysfeqhygbtjabp.supabase.co
-SUPABASE_ANON_KEY=sb_publishable__-LZbuAMoXV1C3ncBfB4zA_Jx_xiMxC
-SUPABASE_SECRET_KEY=sb_secret_abylIj_1x9-7KplLyAOQxw_ubde-NPp
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SECRET_KEY=
 ```
 
 ### 安装依赖
